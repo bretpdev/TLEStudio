@@ -1,0 +1,25 @@
+# Build output
+**/bin/
+**/obj/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+
+# VS Code local workspace state
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Local .NET tooling
+.vs/
+TestResults/
+artifacts/
