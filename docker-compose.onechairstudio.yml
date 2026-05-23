@@ -1,0 +1,16 @@
+services:
+  onechairstudio-mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: onechairstudio-mssql
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Developer"
+      SA_PASSWORD: "OneChairSql123!"
+    ports:
+      - "1435:1433"
+    volumes:
+      - onechairstudio-mssql-data:/var/opt/mssql
+    restart: unless-stopped
+
+volumes:
+  onechairstudio-mssql-data:

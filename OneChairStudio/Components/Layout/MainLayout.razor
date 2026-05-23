@@ -1,23 +1,88 @@
 ﻿@inherits LayoutComponentBase
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+<header class="site-header">
+    <nav class="site-nav">
+        <a href="/">Home</a>
+        <AuthorizeView>
+            <Authorized>
+                <a href="/calendar">Calendar</a>
+                <a href="/auth/logout" class="logout-btn">Log out</a>
+            </Authorized>
+            <NotAuthorized>
+                <a href="/login">Login</a>
+            </NotAuthorized>
+        </AuthorizeView>
+    </nav>
+</header>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
-        </div>
-
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+<main class="site-main">
+    @Body
+</main>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
-    <span class="dismiss">🗙</span>
+    <span class="dismiss">x</span>
 </div>
+
+<style>
+    .site-header {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        backdrop-filter: blur(8px);
+        background: rgba(255, 255, 255, 0.92);
+        border-bottom: 1px solid #eceff4;
+    }
+
+    .site-nav {
+        width: min(1120px, 92vw);
+        margin: 0 auto;
+        padding: 0.8rem 0;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 1rem;
+    }
+
+    .site-nav a,
+    .logout-btn {
+        text-decoration: none;
+        color: #1f2430;
+        font-weight: 600;
+        border: 0;
+        background: transparent;
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .site-nav a:hover,
+    .logout-btn:hover {
+        color: #ff4f7b;
+    }
+
+    .site-main {
+        min-height: 100vh;
+    }
+
+    #blazor-error-ui {
+        color-scheme: light only;
+        background: lightyellow;
+        bottom: 0;
+        box-shadow: 0 -1px 2px rgba(0, 0, 0, 0.2);
+        box-sizing: border-box;
+        display: none;
+        left: 0;
+        padding: 0.6rem 1.25rem 0.7rem 1.25rem;
+        position: fixed;
+        width: 100%;
+        z-index: 1000;
+    }
+
+    #blazor-error-ui .dismiss {
+        cursor: pointer;
+        position: absolute;
+        right: 0.75rem;
+        top: 0.5rem;
+    }
+</style>

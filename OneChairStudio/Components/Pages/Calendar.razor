@@ -1,0 +1,207 @@
+@page "/calendar"
+@attribute [Authorize]
+
+<PageTitle>Availability Calendar</PageTitle>
+
+<div class="calendar-page">
+    <header class="calendar-head">
+        <p class="calendar-label">Client Calendar</p>
+        <h1>Find your next opening</h1>
+        <p>Filter by service and the calendar shows times with enough appointment length.</p>
+    </header>
+
+    <section class="calendar-filters">
+        <label for="service">Service Type</label>
+        <select id="service" @bind="_selectedService">
+            @foreach (var service in _serviceDurations.Keys)
+            {
+                <option value="@service">@service</option>
+            }
+        </select>
+
+        <label for="date">Date</label>
+        <InputDate id="date" @bind-Value="_selectedDate" />
+
+        <button type="button" @onclick="ApplyFilters">Apply Filters</button>
+    </section>
+
+    <section class="calendar-results">
+        <h2>Available Times</h2>
+
+        @if (_filteredSlots.Count == 0)
+        {
+            <p>No times currently fit this service length. Try a different date or service.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var slot in _filteredSlots)
+                {
+                    <li>
+                        <strong>@slot.Start.ToString("ddd, MMM d")</strong>
+                        <span>@slot.Start.ToString("h:mm tt") - @slot.End.ToString("h:mm tt")</span>
+                        <em>@slot.DurationMinutes minutes</em>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+</div>
+
+@code {
+    private readonly Dictionary<string, int> _serviceDurations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Haircut"] = 60,
+        ["Color"] = 150,
+        ["Cut + Color"] = 180,
+        ["Gloss / Toner"] = 90,
+        ["Event Styling"] = 75
+    };
+
+    private readonly List<AvailabilitySlot> _allSlots = [];
+    private List<AvailabilitySlot> _filteredSlots = [];
+
+    private string _selectedService = "Color";
+    private DateOnly _selectedDate = DateOnly.FromDateTime(DateTime.Today);
+
+    protected override void OnInitialized()
+    {
+        SeedAvailability();
+        ApplyFilters();
+    }
+
+    private void SeedAvailability()
+    {
+        var day = DateTime.Today;
+        for (var i = 0; i < 10; i++)
+        {
+            var current = day.AddDays(i);
+            if (current.DayOfWeek is DayOfWeek.Sunday or DayOfWeek.Monday)
+            {
+                continue;
+            }
+
+            _allSlots.Add(new AvailabilitySlot(current.AddHours(10), current.AddHours(11.5)));
+            _allSlots.Add(new AvailabilitySlot(current.AddHours(12), current.AddHours(14.5)));
+            _allSlots.Add(new AvailabilitySlot(current.AddHours(15), current.AddHours(18)));
+        }
+    }
+
+    private void ApplyFilters()
+    {
+        var requiredMinutes = _serviceDurations[_selectedService];
+
+        _filteredSlots = _allSlots
+            .Where(slot => DateOnly.FromDateTime(slot.Start) == _selectedDate)
+            .Where(slot => slot.DurationMinutes >= requiredMinutes)
+            .OrderBy(slot => slot.Start)
+            .ToList();
+    }
+
+    private sealed record AvailabilitySlot(DateTime Start, DateTime End)
+    {
+        public int DurationMinutes => (int)(End - Start).TotalMinutes;
+    }
+}
+
+<style>
+    .calendar-page {
+        width: min(980px, 92vw);
+        margin: 0 auto;
+        padding: 2.6rem 0 4rem;
+    }
+
+    .calendar-label {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 0.74rem;
+        font-weight: 700;
+        color: #84662b;
+        margin-bottom: 0.65rem;
+    }
+
+    .calendar-head h1,
+    .calendar-results h2 {
+        font-family: "Fraunces", Georgia, serif;
+    }
+
+    .calendar-head p {
+        color: #5f6672;
+        margin: 0.6rem 0 0;
+    }
+
+    .calendar-filters {
+        margin-top: 1.4rem;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.8rem;
+        align-items: end;
+        border: 1px solid #eceff4;
+        border-radius: 16px;
+        padding: 1rem;
+        background: #fff;
+    }
+
+    .calendar-filters label {
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: #1f2430;
+    }
+
+    .calendar-filters select,
+    .calendar-filters input {
+        width: 100%;
+        border: 1px solid #d7dce6;
+        border-radius: 10px;
+        padding: 0.62rem 0.75rem;
+        font: inherit;
+        margin-top: 0.3rem;
+    }
+
+    .calendar-filters button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.72rem 1rem;
+        background: linear-gradient(135deg, #ff6a5b, #ff4f7b);
+        color: #fff;
+        font-weight: 700;
+        cursor: pointer;
+        align-self: center;
+    }
+
+    .calendar-results {
+        margin-top: 1.2rem;
+        border: 1px solid #eceff4;
+        border-radius: 16px;
+        padding: 1rem;
+        background: #fff;
+    }
+
+    .calendar-results ul {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.65rem;
+    }
+
+    .calendar-results li {
+        border: 1px solid #e9edf4;
+        border-radius: 12px;
+        padding: 0.75rem 0.85rem;
+        display: grid;
+        gap: 0.2rem;
+    }
+
+    .calendar-results li span,
+    .calendar-results li em,
+    .calendar-results p {
+        color: #5f6672;
+    }
+
+    @@media (max-width: 760px) {
+        .calendar-filters {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
