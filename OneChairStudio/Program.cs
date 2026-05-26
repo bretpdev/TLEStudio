@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using OneChairStudio.Components;
 using OneChairStudio.Data;
+using System.Security.Claims;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,6 +64,162 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
+
+app.MapGet("/calendar-feed.ics", async (HttpContext http, AppDbContext db, IConfiguration config) =>
+{
+    var configuredToken = config["CalendarFeed:AccessToken"];
+    if (!string.IsNullOrWhiteSpace(configuredToken))
+    {
+        var providedToken = http.Request.Query["token"].ToString();
+        if (!string.Equals(providedToken, configuredToken, StringComparison.Ordinal))
+        {
+            return Results.Unauthorized();
+        }
+    }
+
+    var appointments = await db.Appointments
+        .AsNoTracking()
+        .Where(x => x.Status == "Booked")
+        .Join(
+            db.ServiceOfferings.AsNoTracking(),
+            appt => appt.ServiceOfferingId,
+            svc => svc.Id,
+            (appt, svc) => new
+            {
+                appt.Id,
+                appt.StartTime,
+                appt.EndTime,
+                appt.ClientUserName,
+                ServiceName = svc.Name
+            })
+        .OrderBy(x => x.StartTime)
+        .ToListAsync();
+
+    static string ToIcsUtc(DateTime value)
+    {
+        var utc = DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+        return utc.ToString("yyyyMMdd'T'HHmmss'Z'");
+    }
+
+    static string EscapeIcs(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(";", "\\;", StringComparison.Ordinal)
+            .Replace(",", "\\,", StringComparison.Ordinal)
+            .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+    }
+
+    var nowUtc = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
+    var sb = new StringBuilder();
+
+    sb.AppendLine("BEGIN:VCALENDAR");
+    sb.AppendLine("VERSION:2.0");
+    sb.AppendLine("PRODID:-//OneChairStudio//Appointments//EN");
+    sb.AppendLine("CALSCALE:GREGORIAN");
+    sb.AppendLine("METHOD:PUBLISH");
+    sb.AppendLine("X-WR-CALNAME:One Chair Studio Appointments");
+
+    foreach (var row in appointments)
+    {
+        var summary = EscapeIcs(row.ServiceName);
+        var description = EscapeIcs($"Client: {row.ClientUserName}");
+        var uid = $"appt-{row.Id}@onechairstudio";
+
+        sb.AppendLine("BEGIN:VEVENT");
+        sb.AppendLine($"UID:{uid}");
+        sb.AppendLine($"DTSTAMP:{nowUtc}");
+        sb.AppendLine($"DTSTART:{ToIcsUtc(row.StartTime)}");
+        sb.AppendLine($"DTEND:{ToIcsUtc(row.EndTime)}");
+        sb.AppendLine($"SUMMARY:{summary}");
+        sb.AppendLine($"DESCRIPTION:{description}");
+        sb.AppendLine("END:VEVENT");
+    }
+
+    sb.AppendLine("END:VCALENDAR");
+
+    return Results.Text(sb.ToString(), "text/calendar; charset=utf-8");
+});
+
+app.MapGet("/appointments/{appointmentId:int}/download.ics", async (int appointmentId, HttpContext http, AppDbContext db) =>
+{
+    var userName = http.User.Identity?.Name;
+    var isAdmin = http.User.IsInRole("Admin") ||
+                  http.User.Claims.Any(x => x.Type == ClaimTypes.Role && x.Value == "Admin");
+
+    if (string.IsNullOrWhiteSpace(userName))
+    {
+        return Results.Unauthorized();
+    }
+
+    var row = await db.Appointments
+        .AsNoTracking()
+        .Where(x => x.Id == appointmentId)
+        .Where(x => x.Status == "Booked")
+        .Join(
+            db.ServiceOfferings.AsNoTracking(),
+            appt => appt.ServiceOfferingId,
+            svc => svc.Id,
+            (appt, svc) => new
+            {
+                appt.Id,
+                appt.StartTime,
+                appt.EndTime,
+                appt.ClientUserName,
+                ServiceName = svc.Name
+            })
+        .FirstOrDefaultAsync();
+
+    if (row is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (!isAdmin && !string.Equals(row.ClientUserName, userName, StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.Forbid();
+    }
+
+    static string ToIcsUtc(DateTime value)
+    {
+        var utc = DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime();
+        return utc.ToString("yyyyMMdd'T'HHmmss'Z'");
+    }
+
+    static string EscapeIcs(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace(";", "\\;", StringComparison.Ordinal)
+            .Replace(",", "\\,", StringComparison.Ordinal)
+            .Replace("\r\n", "\\n", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
+    }
+
+    var nowUtc = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
+    var sb = new StringBuilder();
+
+    sb.AppendLine("BEGIN:VCALENDAR");
+    sb.AppendLine("VERSION:2.0");
+    sb.AppendLine("PRODID:-//OneChairStudio//SingleAppointment//EN");
+    sb.AppendLine("CALSCALE:GREGORIAN");
+    sb.AppendLine("METHOD:PUBLISH");
+    sb.AppendLine("BEGIN:VEVENT");
+    sb.AppendLine($"UID:appt-{row.Id}@onechairstudio");
+    sb.AppendLine($"DTSTAMP:{nowUtc}");
+    sb.AppendLine($"DTSTART:{ToIcsUtc(row.StartTime)}");
+    sb.AppendLine($"DTEND:{ToIcsUtc(row.EndTime)}");
+    sb.AppendLine($"SUMMARY:{EscapeIcs(row.ServiceName)}");
+    sb.AppendLine($"DESCRIPTION:{EscapeIcs($"Client: {row.ClientUserName}")}");
+    sb.AppendLine("END:VEVENT");
+    sb.AppendLine("END:VCALENDAR");
+
+    var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+    var fileName = $"onechairstudio-appointment-{row.StartTime:yyyyMMdd-HHmm}.ics";
+
+    return Results.File(bytes, "text/calendar; charset=utf-8", fileName);
+}).RequireAuthorization();
 
 app.MapControllers();
 app.MapStaticAssets();

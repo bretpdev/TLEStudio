@@ -37,7 +37,7 @@ public sealed class AuthController(AppDbContext dbContext) : Controller
         {
             new Claim(ClaimTypes.NameIdentifier, account.Id.ToString()),
             new Claim(ClaimTypes.Name, account.UserName),
-            new Claim(ClaimTypes.Role, "Client")
+            new Claim(ClaimTypes.Role, account.IsAdmin ? "Admin" : "Client")
         };
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);

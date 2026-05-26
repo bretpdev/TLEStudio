@@ -6,6 +6,11 @@
         <AuthorizeView>
             <Authorized>
                 <a href="/calendar">Calendar</a>
+                <AuthorizeView Roles="Admin">
+                    <Authorized Context="adminAuth">
+                        <a href="/admin-dashboard">Admin Dashboard</a>
+                    </Authorized>
+                </AuthorizeView>
                 <a href="/auth/logout" class="logout-btn">Log out</a>
             </Authorized>
             <NotAuthorized>

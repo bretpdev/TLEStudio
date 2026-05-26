@@ -1,0 +1,317 @@
+@using OneChairStudio.Models
+
+@if (IsOpen && SelectedStart is not null)
+{
+    <div class="manage-modal-backdrop" @onclick="Close">
+        <div class="manage-modal" @onclick:stopPropagation="true" role="dialog" aria-modal="true" aria-label="Manage appointment">
+            <header class="manage-modal-head">
+                <h3>@(AppointmentId is null ? "Manage Appointment" : "Manage Existing Appointment")</h3>
+                <button type="button" class="manage-close" @onclick="Close" aria-label="Close">x</button>
+            </header>
+
+            <p class="manage-time">Selected time: @SelectedStart.Value.ToString("dddd, MMM d h:mm tt")</p>
+
+            <div class="manage-reschedule">
+                <div>
+                    <label for="manageDate">Reschedule Date</label>
+                    <input id="manageDate" type="date" value="@GetSelectedDateValue()" @onchange="OnRescheduleDateChanged" />
+                </div>
+                <div>
+                    <label for="manageHour">Reschedule Time</label>
+                    <select id="manageHour" value="@GetSelectedHourValue()" @onchange="OnRescheduleHourChanged">
+                        @foreach (var hour in _hourChoices)
+                        {
+                            <option value="@hour">@FormatHourStart(hour)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="manage-fields">
+                <div>
+                    <label for="manageClient">Client</label>
+                    @Clients.FirstOrDefault(p => p.Id == SelectedClientId)?.UserName
+                </div>
+
+                <div>
+                    <label for="manageService">Appointment Type</label>
+                    <select id="manageService" value="@SelectedServiceId" @onchange="OnServiceChanged">
+                        <option value="0">Select service</option>
+                        @foreach (var service in Services)
+                        {
+                            <option value="@service.Id">@service.Name (@service.DurationMinutes min)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(EndPreviewText))
+            {
+                <p class="manage-preview">End time preview: @EndPreviewText</p>
+            }
+
+            <div class="manage-actions">
+                <button type="button" class="auth-btn" @onclick="Save">Save Appointment</button>
+                @if (AppointmentId is not null)
+                {
+                    <button type="button" class="danger-btn" @onclick="CancelAppointment">Cancel Appointment</button>
+                }
+                <button type="button" class="outline-btn" @onclick="Close">Close</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(Message))
+            {
+                <p class="admin-manage-msg">@Message</p>
+            }
+
+            <p class="admin-manage-note">Admin scheduling can exceed currently open slot length.</p>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly int[] _hourChoices = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
+    [Parameter] public bool IsOpen { get; set; }
+    [Parameter] public DateTime? SelectedStart { get; set; }
+    [Parameter] public EventCallback<DateTime?> SelectedStartChanged { get; set; }
+    [Parameter] public int? AppointmentId { get; set; }
+    [Parameter] public int SelectedClientId { get; set; }
+    [Parameter] public EventCallback<int> SelectedClientIdChanged { get; set; }
+    [Parameter] public int SelectedServiceId { get; set; }
+    [Parameter] public EventCallback<int> SelectedServiceIdChanged { get; set; }
+    [Parameter] public string? EndPreviewText { get; set; }
+    [Parameter] public string? Message { get; set; }
+
+    [Parameter] public IReadOnlyList<LoginUser> Clients { get; set; } = [];
+    [Parameter] public IReadOnlyList<ServiceOffering> Services { get; set; } = [];
+
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancelAppointment { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private async Task OnClientChanged(ChangeEventArgs args)
+    {
+        if (args.Value is null)
+        {
+            await SelectedClientIdChanged.InvokeAsync(0);
+            return;
+        }
+
+        var parsed = int.TryParse(args.Value.ToString(), out var id) ? id : 0;
+        await SelectedClientIdChanged.InvokeAsync(parsed);
+    }
+
+    private async Task OnServiceChanged(ChangeEventArgs args)
+    {
+        if (args.Value is null)
+        {
+            await SelectedServiceIdChanged.InvokeAsync(0);
+            return;
+        }
+
+        var parsed = int.TryParse(args.Value.ToString(), out var id) ? id : 0;
+        await SelectedServiceIdChanged.InvokeAsync(parsed);
+    }
+
+    private string GetSelectedDateValue()
+    {
+        if (SelectedStart is null)
+        {
+            return string.Empty;
+        }
+
+        return SelectedStart.Value.ToString("yyyy-MM-dd");
+    }
+
+    private string GetSelectedHourValue()
+    {
+        if (SelectedStart is null)
+        {
+            return _hourChoices[0].ToString();
+        }
+
+        return SelectedStart.Value.Hour.ToString();
+    }
+
+    private string FormatHourStart(int hour)
+    {
+        var time = new DateTime(2000, 1, 1, hour, 0, 0);
+        return time.ToString("h:mm tt");
+    }
+
+    private async Task OnRescheduleDateChanged(ChangeEventArgs args)
+    {
+        if (SelectedStart is null || args.Value is null)
+        {
+            return;
+        }
+
+        if (!DateOnly.TryParse(args.Value.ToString(), out var newDate))
+        {
+            return;
+        }
+
+        var current = SelectedStart.Value;
+        var updated = newDate.ToDateTime(new TimeOnly(current.Hour, current.Minute));
+        await SelectedStartChanged.InvokeAsync(updated);
+    }
+
+    private async Task OnRescheduleHourChanged(ChangeEventArgs args)
+    {
+        if (SelectedStart is null || args.Value is null)
+        {
+            return;
+        }
+
+        if (!int.TryParse(args.Value.ToString(), out var newHour))
+        {
+            return;
+        }
+
+        var current = SelectedStart.Value;
+        var updated = new DateTime(current.Year, current.Month, current.Day, newHour, 0, 0);
+        await SelectedStartChanged.InvokeAsync(updated);
+    }
+
+    private async Task Save()
+    { 
+        await OnSave.InvokeAsync();
+        await OnClose.InvokeAsync();
+    }
+
+    private Task CancelAppointment() => OnCancelAppointment.InvokeAsync();
+
+    private Task Close() => OnClose.InvokeAsync();
+}
+
+<style>
+    .manage-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(17, 22, 34, 0.48);
+        display: grid;
+        place-items: center;
+        z-index: 1200;
+        padding: 1rem;
+    }
+
+    .manage-modal {
+        width: min(640px, 96vw);
+        background: linear-gradient(180deg, #ffffff, #faf8ff);
+        border: 1px solid #e5def8;
+        border-left: 6px solid #6f5fd0;
+        border-radius: 14px;
+        box-shadow: 0 18px 42px rgba(30, 24, 54, 0.22);
+        padding: 0.95rem;
+    }
+
+    .manage-modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.6rem;
+    }
+
+    .manage-modal-head h3 {
+        margin: 0;
+        font-family: "Fraunces", Georgia, serif;
+    }
+
+    .manage-close {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.28rem 0.58rem;
+        background: #efeafd;
+        color: #4a3b8f;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .manage-time {
+        margin: 0.35rem 0 0.45rem;
+        color: #4d5667;
+    }
+
+    .manage-reschedule {
+        margin-top: 0.35rem;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+    }
+
+    .manage-reschedule label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.84rem;
+        font-weight: 700;
+        color: #4d5667;
+    }
+
+    .manage-reschedule input,
+    .manage-reschedule select {
+        width: 100%;
+        border: 1px solid #d7dce6;
+        border-radius: 10px;
+        padding: 0.5rem 0.6rem;
+        font: inherit;
+    }
+
+    .manage-fields {
+        margin-top: 0.35rem;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+    }
+
+    .manage-fields label {
+        display: block;
+        margin-bottom: 0.25rem;
+        font-size: 0.84rem;
+        font-weight: 700;
+        color: #4d5667;
+    }
+
+    .manage-fields select {
+        width: 100%;
+        border: 1px solid #d7dce6;
+        border-radius: 10px;
+        padding: 0.5rem 0.6rem;
+        font: inherit;
+    }
+
+    .manage-preview {
+        margin-top: 0.55rem;
+        color: #375286;
+        font-weight: 600;
+    }
+
+    .manage-actions {
+        margin-top: 0.65rem;
+        display: flex;
+        gap: 0.55rem;
+        flex-wrap: wrap;
+    }
+
+    .admin-manage-msg {
+        margin-top: 0.55rem;
+        color: #2d5a18;
+        font-weight: 600;
+    }
+
+    .admin-manage-note {
+        margin-top: 0.45rem;
+        color: #697386;
+        font-size: 0.84rem;
+    }
+
+    @@media (max-width: 760px) {
+        .manage-reschedule {
+            grid-template-columns: 1fr;
+        }
+
+        .manage-fields {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
