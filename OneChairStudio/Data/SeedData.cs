@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OneChairStudio.Models;
+using TLEStudio.Models;
 
-namespace OneChairStudio.Data;
+namespace TLEStudio.Data;
 
 public static class SeedData
 {

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using OneChairStudio.Models;
+using TLEStudio.Models;
 
-namespace OneChairStudio.Data;
+namespace TLEStudio.Data;
 
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {

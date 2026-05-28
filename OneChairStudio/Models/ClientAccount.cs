@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace OneChairStudio.Models;
+namespace TLEStudio.Models;
 
 public sealed class LoginUser
 {

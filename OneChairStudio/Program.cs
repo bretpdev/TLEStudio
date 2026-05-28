@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
-using OneChairStudio.Components;
-using OneChairStudio.Data;
+using TLEStudio.Components;
+using TLEStudio.Data;
 using System.Security.Claims;
 using System.Text;
 
@@ -14,7 +14,7 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
-        options.Cookie.Name = "OneChairStudioAuth";
+        options.Cookie.Name = "TLEStudioAuth";
         options.LoginPath = "/login";
         options.LogoutPath = "/auth/logout";
         options.ExpireTimeSpan = TimeSpan.FromDays(30);
@@ -41,6 +41,19 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                 errorNumbersToAdd: null);
             sqlOptions.CommandTimeout(30);
         }));
+
+builder.Services.AddDbContextFactory<AppDbContext>(options =>
+    options.UseSqlServer(
+        connectionString,
+        sqlOptions =>
+        {
+            sqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null);
+            sqlOptions.CommandTimeout(30);
+        }),
+    ServiceLifetime.Scoped);
 
 var app = builder.Build();
 
@@ -116,7 +129,7 @@ app.MapGet("/calendar-feed.ics", async (HttpContext http, AppDbContext db, IConf
 
     sb.AppendLine("BEGIN:VCALENDAR");
     sb.AppendLine("VERSION:2.0");
-    sb.AppendLine("PRODID:-//OneChairStudio//Appointments//EN");
+    sb.AppendLine("PRODID:-//TLEStudio//Appointments//EN");
     sb.AppendLine("CALSCALE:GREGORIAN");
     sb.AppendLine("METHOD:PUBLISH");
     sb.AppendLine("X-WR-CALNAME:One Chair Studio Appointments");
@@ -125,7 +138,7 @@ app.MapGet("/calendar-feed.ics", async (HttpContext http, AppDbContext db, IConf
     {
         var summary = EscapeIcs(row.ServiceName);
         var description = EscapeIcs($"Client: {row.ClientUserName}");
-        var uid = $"appt-{row.Id}@onechairstudio";
+        var uid = $"appt-{row.Id}@tlestudio";
 
         sb.AppendLine("BEGIN:VEVENT");
         sb.AppendLine($"UID:{uid}");
@@ -202,11 +215,11 @@ app.MapGet("/appointments/{appointmentId:int}/download.ics", async (int appointm
 
     sb.AppendLine("BEGIN:VCALENDAR");
     sb.AppendLine("VERSION:2.0");
-    sb.AppendLine("PRODID:-//OneChairStudio//SingleAppointment//EN");
+    sb.AppendLine("PRODID:-//TLEStudio//SingleAppointment//EN");
     sb.AppendLine("CALSCALE:GREGORIAN");
     sb.AppendLine("METHOD:PUBLISH");
     sb.AppendLine("BEGIN:VEVENT");
-    sb.AppendLine($"UID:appt-{row.Id}@onechairstudio");
+    sb.AppendLine($"UID:appt-{row.Id}@tlestudio");
     sb.AppendLine($"DTSTAMP:{nowUtc}");
     sb.AppendLine($"DTSTART:{ToIcsUtc(row.StartTime)}");
     sb.AppendLine($"DTEND:{ToIcsUtc(row.EndTime)}");
@@ -216,7 +229,7 @@ app.MapGet("/appointments/{appointmentId:int}/download.ics", async (int appointm
     sb.AppendLine("END:VCALENDAR");
 
     var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-    var fileName = $"onechairstudio-appointment-{row.StartTime:yyyyMMdd-HHmm}.ics";
+    var fileName = $"tlestudio-appointment-{row.StartTime:yyyyMMdd-HHmm}.ics";
 
     return Results.File(bytes, "text/calendar; charset=utf-8", fileName);
 }).RequireAuthorization();

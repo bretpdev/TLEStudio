@@ -3,8 +3,8 @@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
-@using OneChairStudio.Data
-@using OneChairStudio.Models
+@using TLEStudio.Data
+@using TLEStudio.Models
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject AppDbContext DbContext
 
@@ -45,87 +45,6 @@
                         </li>
                     }
                 </ul>
-            }
-        </section>
-    }
-
-    @if (_isAdmin)
-    {
-        <section class="admin-editor">
-            <h2>Admin Availability Editor</h2>
-            <p>Set weekly hours for each weekday and apply them across the calendar range, then use a single-day override for exceptions.</p>
-
-            <div class="editor-subsection">
-                <h3>Weekly Hours Template</h3>
-
-                <div class="weekly-grid">
-                    @foreach (var rule in _weeklyRules)
-                    {
-                        <div class="week-rule">
-                            <strong>@rule.DayName</strong>
-
-                            <label class="inline-check">
-                                <input type="checkbox" @bind="rule.IsOpen" />
-                                <span>Open</span>
-                            </label>
-
-                            <div class="week-rule-hours">
-                                <select @bind="rule.StartHour" disabled="@(!rule.IsOpen)">
-                                    @foreach (var hour in _hourChoices)
-                                    {
-                                        <option value="@hour">@FormatHourStart(hour)</option>
-                                    }
-                                </select>
-                                <span>to</span>
-                                <select @bind="rule.EndHour" disabled="@(!rule.IsOpen)">
-                                    @foreach (var hour in _hourChoices.Where(h => h > 0))
-                                    {
-                                        <option value="@hour">@FormatHourStart(hour)</option>
-                                    }
-                                </select>
-                            </div>
-                        </div>
-                    }
-                </div>
-
-                <div class="editor-actions">
-                    <button type="button" class="outline-btn" @onclick="LoadWeeklyRulesAsync">Reload Template</button>
-                    <button type="button" class="auth-btn" @onclick="SaveWeeklyRulesAsync">Save Template</button>
-                    <button type="button" class="auth-btn secondary" @onclick="ApplyWeeklyTemplateAsync">Apply Template To Range</button>
-                </div>
-            </div>
-
-            <div class="editor-subsection">
-                <h3>Single-Day Override</h3>
-
-                <div class="editor-tools">
-                    <div>
-                        <label for="overrideDate">Date</label>
-                        <InputDate id="overrideDate"
-                                   Value="_overrideDate"
-                                   ValueChanged="OverrideDateChanged"
-                                   ValueExpression="() => _overrideDate" />
-                    </div>
-                    <button type="button" class="auth-btn" @onclick="SaveOverrideDayAsync">Save Day Override</button>
-                    <button type="button" class="danger-btn" @onclick="CloseOverrideDayAsync">Close Day</button>
-                </div>
-
-                <div class="hour-grid">
-                    @foreach (var hour in _hourChoices)
-                    {
-                        <label>
-                            <input type="checkbox"
-                                   checked="@IsHourSelected(hour)"
-                                   @onchange="eventArgs => OnHourToggle(hour, eventArgs)" />
-                            <span>@FormatHour(hour)</span>
-                        </label>
-                    }
-                </div>
-            </div>
-
-            @if (!string.IsNullOrWhiteSpace(_adminStatusMessage))
-            {
-                <p class="admin-status">@_adminStatusMessage</p>
             }
         </section>
     }
@@ -221,7 +140,7 @@
                                     }
                                     else if (eventsForDay.Count == 0 && bookedForDay.Count == 0)
                                     {
-                                        <p class="no-openings">No open blocks</p>
+                                        <p class="no-openings">@(_isAdmin ? "No open blocks" : "No open blocks for selected service duration")</p>
                                     }
                                     else
                                     {
@@ -315,19 +234,14 @@
     private readonly List<List<DateOnly>> _weeks = [];
     private readonly List<ServiceOffering> _services = [];
     private readonly List<LoginUser> _clients = [];
-    private readonly int[] _hourChoices = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
-    private readonly HashSet<int> _selectedHours = [];
-    private readonly List<WeeklyRuleEditor> _weeklyRules = CreateDefaultWeeklyRules();
 
     private DateOnly _rangeStart;
     private DateOnly _rangeEnd;
     private CalendarView _selectedView = CalendarView.Calendar;
-    private DateOnly _overrideDate = DateOnly.FromDateTime(DateTime.Today);
     private int _selectedServiceId;
     private bool _isAdmin;
     private bool _isAdminManageModalOpen;
     private string _currentUserName = string.Empty;
-    private string? _adminStatusMessage;
     private string? _bookingMessage;
     private int? _adminManageAppointmentId;
     private DateTime? _adminManageStart;
@@ -338,7 +252,6 @@
     private List<AgendaBookingItem> _agendaItems = [];
     private List<ClientBookingBlock> _myAppointments = [];
     private List<AdminBookedAppointment> _adminBookedAppointments = [];
-    private EventCallback<DateOnly> OverrideDateChanged => EventCallback.Factory.Create<DateOnly>(this, OnOverrideDateChangedAsync);
 
     protected override async Task OnInitializedAsync()
     {
@@ -359,8 +272,6 @@
         if (_isAdmin)
         {
             await LoadClientsAsync();
-            await LoadWeeklyRulesAsync();
-            await LoadOverrideDayAsync();
             await LoadAdminBookedAppointmentsAsync();
         }
         else
@@ -373,11 +284,6 @@
     {
         _rangeStart = _rangeStart.AddDays(dayOffset);
         _rangeEnd = _rangeEnd.AddDays(dayOffset);
-
-        if (_overrideDate < _rangeStart || _overrideDate > _rangeEnd)
-        {
-            _overrideDate = _rangeStart;
-        }
 
         BuildWeeks();
         await LoadAvailabilityAsync();
@@ -469,7 +375,7 @@
         _agendaItems = [];
 
         var selectedService = _services.FirstOrDefault(x => x.Id == _selectedServiceId);
-        if (selectedService is null)
+        if (!_isAdmin && selectedService is null)
         {
             return;
         }
@@ -512,7 +418,14 @@
             .GroupBy(x => DateOnly.FromDateTime(x))
             .ToDictionary(x => x.Key, x => x.ToHashSet());
 
-        _events.AddRange(BuildOpeningsForService(selectedService, freeByDay));
+        if (_isAdmin)
+        {
+            _events.AddRange(BuildOpeningsForAdmin(freeByDay));
+        }
+        else
+        {
+            _events.AddRange(BuildOpeningsForService(selectedService!, freeByDay));
+        }
 
         _events.Sort((a, b) => a.Start.CompareTo(b.Start));
         await LoadAgendaItemsAsync(rangeStart, rangeEndExclusive);
@@ -640,6 +553,22 @@
 
                 var end = start.AddMinutes(service.DurationMinutes);
                 events.Add(new AvailabilityEvent(service.Id, start, end, $"{service.Name} ({service.DurationMinutes} min)"));
+            }
+        }
+
+        return events;
+    }
+
+    private static List<AvailabilityEvent> BuildOpeningsForAdmin(
+        IReadOnlyDictionary<DateOnly, HashSet<DateTime>> freeByDay)
+    {
+        var events = new List<AvailabilityEvent>();
+
+        foreach (var starts in freeByDay.Values)
+        {
+            foreach (var start in starts.OrderBy(x => x))
+            {
+                events.Add(new AvailabilityEvent(0, start, start.AddHours(1), "Open block"));
             }
         }
 
@@ -969,287 +898,6 @@
         return day.AddDays(-diff);
     }
 
-    private bool IsHourSelected(int hour)
-    {
-        return _selectedHours.Contains(hour);
-    }
-
-    private void OnHourToggle(int hour, ChangeEventArgs args)
-    {
-        var isChecked = args.Value is bool b && b;
-        if (isChecked)
-        {
-            _selectedHours.Add(hour);
-        }
-        else
-        {
-            _selectedHours.Remove(hour);
-        }
-    }
-
-    private string FormatHour(int hour)
-    {
-        var start = new DateTime(2000, 1, 1, hour, 0, 0);
-        var end = start.AddHours(1);
-        return $"{start:h tt} - {end:h tt}";
-    }
-
-    private string FormatHourStart(int hour)
-    {
-        var time = new DateTime(2000, 1, 1, hour, 0, 0);
-        return time.ToString("h tt");
-    }
-
-    private async Task LoadWeeklyRulesAsync()
-    {
-        var dbRules = await DbContext.WeeklyAvailabilityRules
-            .AsNoTracking()
-            .OrderBy(x => x.DayOfWeekNumber)
-            .ToListAsync();
-
-        foreach (var editor in _weeklyRules)
-        {
-            var dayNumber = (int)editor.DayOfWeek;
-            var dbRule = dbRules.FirstOrDefault(x => x.DayOfWeekNumber == dayNumber);
-            if (dbRule is null)
-            {
-                continue;
-            }
-
-            editor.IsOpen = dbRule.IsOpen;
-            editor.StartHour = dbRule.StartHour;
-            editor.EndHour = dbRule.EndHour;
-        }
-
-        _adminStatusMessage = "Weekly template loaded.";
-    }
-
-    private async Task SaveWeeklyRulesAsync()
-    {
-        if (!TryValidateWeeklyRules(out var validationError))
-        {
-            _adminStatusMessage = validationError;
-            return;
-        }
-
-        await UpsertWeeklyRulesAsync();
-        _adminStatusMessage = "Weekly template saved.";
-    }
-
-    private async Task ApplyWeeklyTemplateAsync()
-    {
-        if (!TryValidateWeeklyRules(out var validationError))
-        {
-            _adminStatusMessage = validationError;
-            return;
-        }
-
-        await UpsertWeeklyRulesAsync();
-
-        var rangeStart = _rangeStart.ToDateTime(TimeOnly.MinValue);
-        var rangeEndExclusive = _rangeEnd.AddDays(1).ToDateTime(TimeOnly.MinValue);
-        var overrideDates = await DbContext.DayAvailabilityOverrides
-            .AsNoTracking()
-            .Where(x => x.OverrideDate >= _rangeStart && x.OverrideDate <= _rangeEnd)
-            .Select(x => x.OverrideDate)
-            .ToListAsync();
-        var overrideDateSet = overrideDates.ToHashSet();
-
-        var existingRows = await DbContext.AvailabilityHours
-            .Where(x => x.SlotStart >= rangeStart && x.SlotStart < rangeEndExclusive)
-            .Where(x => !overrideDateSet.Contains(DateOnly.FromDateTime(x.SlotStart)))
-            .ToListAsync();
-
-        DbContext.AvailabilityHours.RemoveRange(existingRows);
-
-        var rulesByDay = _weeklyRules.ToDictionary(x => x.DayOfWeek);
-        var appliedDays = 0;
-
-        for (var day = _rangeStart; day <= _rangeEnd; day = day.AddDays(1))
-        {
-            if (day.DayOfWeek == DayOfWeek.Sunday || overrideDateSet.Contains(day))
-            {
-                continue;
-            }
-
-            if (!rulesByDay.TryGetValue(day.DayOfWeek, out var rule) || !rule.IsOpen)
-            {
-                continue;
-            }
-
-            appliedDays++;
-
-            for (var hour = rule.StartHour; hour < rule.EndHour; hour++)
-            {
-                var start = day.ToDateTime(new TimeOnly(hour, 0));
-                DbContext.AvailabilityHours.Add(new AvailabilityHour
-                {
-                    SlotStart = start,
-                    SlotEnd = start.AddHours(1)
-                });
-            }
-        }
-
-        await DbContext.SaveChangesAsync();
-        await LoadAvailabilityAsync();
-
-        _adminStatusMessage = overrideDateSet.Count == 0
-            ? $"Applied weekly template to {appliedDays} day(s) in range."
-            : $"Applied weekly template to {appliedDays} day(s) in range. Skipped {overrideDateSet.Count} override day(s).";
-    }
-
-    private async Task UpsertWeeklyRulesAsync()
-    {
-        var existingRules = await DbContext.WeeklyAvailabilityRules.ToListAsync();
-
-        foreach (var editor in _weeklyRules)
-        {
-            var dayNumber = (int)editor.DayOfWeek;
-            var dbRule = existingRules.FirstOrDefault(x => x.DayOfWeekNumber == dayNumber);
-
-            if (dbRule is null)
-            {
-                DbContext.WeeklyAvailabilityRules.Add(new WeeklyAvailabilityRule
-                {
-                    DayOfWeekNumber = dayNumber,
-                    IsOpen = editor.IsOpen,
-                    StartHour = editor.StartHour,
-                    EndHour = editor.EndHour
-                });
-                continue;
-            }
-
-            dbRule.IsOpen = editor.IsOpen;
-            dbRule.StartHour = editor.StartHour;
-            dbRule.EndHour = editor.EndHour;
-        }
-
-        await DbContext.SaveChangesAsync();
-    }
-
-    private bool TryValidateWeeklyRules(out string message)
-    {
-        foreach (var rule in _weeklyRules)
-        {
-            if (!rule.IsOpen)
-            {
-                continue;
-            }
-
-            if (rule.EndHour <= rule.StartHour)
-            {
-                message = $"{rule.DayName}: end hour must be later than start hour.";
-                return false;
-            }
-        }
-
-        message = string.Empty;
-        return true;
-    }
-
-    private async Task LoadOverrideDayAsync()
-    {
-        _selectedHours.Clear();
-
-        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = dayStart.AddDays(1);
-
-        var rows = await DbContext.AvailabilityHours
-            .AsNoTracking()
-            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
-            .ToListAsync();
-
-        foreach (var row in rows)
-        {
-            _selectedHours.Add(row.SlotStart.Hour);
-        }
-
-        _adminStatusMessage = $"Loaded override day {_overrideDate:MMM d, yyyy}.";
-    }
-
-    private async Task OnOverrideDateChangedAsync(DateOnly value)
-    {
-        _overrideDate = value;
-        await LoadOverrideDayAsync();
-    }
-
-    private async Task SaveOverrideDayAsync()
-    {
-        if (_overrideDate.DayOfWeek == DayOfWeek.Sunday)
-        {
-            _adminStatusMessage = "Sunday is closed. Pick Monday through Saturday for overrides.";
-            return;
-        }
-
-        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = dayStart.AddDays(1);
-
-        var existingRows = await DbContext.AvailabilityHours
-            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
-            .ToListAsync();
-
-        DbContext.AvailabilityHours.RemoveRange(existingRows);
-
-        foreach (var hour in _selectedHours)
-        {
-            var start = _overrideDate.ToDateTime(new TimeOnly(hour, 0));
-            DbContext.AvailabilityHours.Add(new AvailabilityHour
-            {
-                SlotStart = start,
-                SlotEnd = start.AddHours(1)
-            });
-        }
-
-        await UpsertDayOverrideAsync(_overrideDate);
-
-        await DbContext.SaveChangesAsync();
-        await LoadAvailabilityAsync();
-        _adminStatusMessage = $"Saved day override for {_overrideDate:MMM d, yyyy}.";
-    }
-
-    private async Task CloseOverrideDayAsync()
-    {
-        if (_overrideDate.DayOfWeek == DayOfWeek.Sunday)
-        {
-            _adminStatusMessage = "Sunday is already closed.";
-            return;
-        }
-
-        _selectedHours.Clear();
-
-        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = dayStart.AddDays(1);
-
-        var existingRows = await DbContext.AvailabilityHours
-            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
-            .ToListAsync();
-
-        if (existingRows.Count > 0)
-        {
-            DbContext.AvailabilityHours.RemoveRange(existingRows);
-        }
-
-        await UpsertDayOverrideAsync(_overrideDate);
-        await DbContext.SaveChangesAsync();
-
-        await LoadAvailabilityAsync();
-        _adminStatusMessage = $"Closed {_overrideDate:MMM d, yyyy}.";
-    }
-
-    private async Task UpsertDayOverrideAsync(DateOnly day)
-    {
-        var existingOverride = await DbContext.DayAvailabilityOverrides
-            .FirstOrDefaultAsync(x => x.OverrideDate == day);
-
-        if (existingOverride is null)
-        {
-            DbContext.DayAvailabilityOverrides.Add(new DayAvailabilityOverride
-            {
-                OverrideDate = day
-            });
-        }
-    }
-
     private bool IsWithinRange(DateOnly day)
     {
         return day >= _rangeStart && day <= _rangeEnd;
@@ -1279,32 +927,6 @@
     private sealed record ClientBookingBlock(int AppointmentId, DateTime Start, DateTime End, string ServiceName);
     private sealed record AdminBookedAppointment(int AppointmentId, DateTime Start, DateTime End, string ServiceName, string ClientUserName);
     private sealed record AgendaBookingItem(int AppointmentId, DateTime Start, DateTime End, string Label, string ClientUserName, int DurationMinutes);
-
-    private sealed class WeeklyRuleEditor
-    {
-        public required DayOfWeek DayOfWeek { get; init; }
-
-        public required string DayName { get; init; }
-
-        public bool IsOpen { get; set; } = true;
-
-        public int StartHour { get; set; } = 10;
-
-        public int EndHour { get; set; } = 18;
-    }
-
-    private static List<WeeklyRuleEditor> CreateDefaultWeeklyRules()
-    {
-        return
-        [
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Monday, DayName = "Monday" },
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Tuesday, DayName = "Tuesday" },
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Wednesday, DayName = "Wednesday" },
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Thursday, DayName = "Thursday" },
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Friday, DayName = "Friday" },
-            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Saturday, DayName = "Saturday" }
-        ];
-    }
 
     private enum CalendarView
     {

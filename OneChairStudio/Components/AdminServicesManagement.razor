@@ -1,0 +1,436 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.EntityFrameworkCore
+@using TLEStudio.Data
+@using TLEStudio.Models
+@inject AppDbContext DbContext
+
+<section class="card-block">
+    <div class="card-head">
+        <strong>Services</strong>
+        <button type="button" class="toggle-btn" @onclick="ToggleServices">
+            @(_showServices ? "Collapse" : "Open")
+        </button>
+    </div>
+
+    @if (_showServices)
+    {
+        <div class="card-body">
+            <EditForm Model="_newService" OnValidSubmit="CreateServiceAsync" FormName="serviceCreateForm">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="service-form-grid">
+                    <div>
+                        <label for="serviceName">Service Name</label>
+                        <InputText id="serviceName" class="field" @bind-Value="_newService.Name" />
+                    </div>
+                    <div>
+                        <label for="servicePrice">Starting Price</label>
+                        <InputNumber id="servicePrice" class="field" @bind-Value="_newService.Price" />
+                    </div>
+                    <div>
+                        <label for="serviceDuration">Duration (minutes)</label>
+                        <InputNumber id="serviceDuration" class="field" @bind-Value="_newService.DurationMinutes" />
+                    </div>
+                    <div class="service-active">
+                        <label>
+                            <InputCheckbox @bind-Value="_newService.IsActive" />
+                            <span>Active</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="service-actions">
+                    <button type="submit" class="save-btn">Add Service</button>
+                </div>
+            </EditForm>
+
+            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+            {
+                <p class="status-msg">@_statusMessage</p>
+            }
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Starting Price</th>
+                            <th>Duration</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var service in _services)
+                        {
+                            <tr>
+                                <td>@service.Name</td>
+                                <td>@service.Price.ToString("C")</td>
+                                <td>@service.DurationMinutes min</td>
+                                <td>@(service.IsActive ? "Yes" : "No")</td>
+                                <td class="table-actions">
+                                    <button type="button" @onclick="() => EditService(service)">Edit</button>
+                                    <button type="button" class="danger" @onclick="() => DeleteServiceAsync(service.Id)">Delete</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (_isEditModalOpen)
+    {
+        <div class="modal-overlay" role="presentation" @onclick="CloseEditModal">
+            <div class="modal-card" role="dialog" aria-modal="true" aria-label="Edit service" @onclick:stopPropagation="true">
+                <h3>Edit Service</h3>
+
+                <EditForm Model="_editService" OnValidSubmit="SaveEditServiceAsync" FormName="serviceEditForm">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary />
+
+                    <div class="service-form-grid">
+                        <div>
+                            <label for="editServiceName">Service Name</label>
+                            <InputText id="editServiceName" class="field" @bind-Value="_editService.Name" />
+                        </div>
+                        <div>
+                            <label for="editServicePrice">Starting Price</label>
+                            <InputNumber id="editServicePrice" class="field" @bind-Value="_editService.Price" />
+                        </div>
+                        <div>
+                            <label for="editServiceDuration">Duration (minutes)</label>
+                            <InputNumber id="editServiceDuration" class="field" @bind-Value="_editService.DurationMinutes" />
+                        </div>
+                        <div class="service-active">
+                            <label>
+                                <InputCheckbox @bind-Value="_editService.IsActive" />
+                                <span>Active</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="service-actions">
+                        <button type="submit" class="save-btn">Save Changes</button>
+                        <button type="button" class="cancel-btn" @onclick="CloseEditModal">Cancel</button>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    }
+</section>
+
+@code {
+    private readonly ServiceEditorModel _newService = new();
+    private readonly ServiceEditorModel _editService = new();
+    private readonly List<ServiceOffering> _services = [];
+
+    private bool _showServices;
+    private bool _isEditModalOpen;
+    private int _editingId;
+    private string? _statusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadServicesAsync();
+    }
+
+    private void ToggleServices()
+    {
+        _showServices = !_showServices;
+    }
+
+    private async Task LoadServicesAsync()
+    {
+        _services.Clear();
+
+        var rows = await DbContext.ServiceOfferings
+            .AsNoTracking()
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+
+        _services.AddRange(rows);
+    }
+
+    private void EditService(ServiceOffering service)
+    {
+        _editingId = service.Id;
+        _isEditModalOpen = true;
+
+        _editService.Name = service.Name;
+        _editService.Price = service.Price;
+        _editService.DurationMinutes = service.DurationMinutes;
+        _editService.IsActive = service.IsActive;
+
+        _statusMessage = null;
+    }
+
+    private async Task CreateServiceAsync()
+    {
+        if (_newService.DurationMinutes <= 0)
+        {
+            _statusMessage = "Duration must be greater than zero.";
+            return;
+        }
+
+        DbContext.ServiceOfferings.Add(new ServiceOffering
+        {
+            Name = _newService.Name.Trim(),
+            Price = _newService.Price,
+            DurationMinutes = _newService.DurationMinutes,
+            IsActive = _newService.IsActive
+        });
+
+        await DbContext.SaveChangesAsync();
+        _statusMessage = "Service added.";
+
+        await LoadServicesAsync();
+        ResetNewForm();
+    }
+
+    private async Task SaveEditServiceAsync()
+    {
+        if (_editService.DurationMinutes <= 0)
+        {
+            _statusMessage = "Duration must be greater than zero.";
+            return;
+        }
+
+        if (_editingId <= 0)
+        {
+            _statusMessage = "Service not found.";
+            return;
+        }
+
+        var row = await DbContext.ServiceOfferings.FirstOrDefaultAsync(x => x.Id == _editingId);
+        if (row is null)
+        {
+            _statusMessage = "Service not found.";
+            CloseEditModal();
+            return;
+        }
+
+        row.Name = _editService.Name.Trim();
+        row.Price = _editService.Price;
+        row.DurationMinutes = _editService.DurationMinutes;
+        row.IsActive = _editService.IsActive;
+
+        await DbContext.SaveChangesAsync();
+        _statusMessage = "Service updated.";
+
+        await LoadServicesAsync();
+        CloseEditModal();
+    }
+
+    private async Task DeleteServiceAsync(int serviceId)
+    {
+        var row = await DbContext.ServiceOfferings.FirstOrDefaultAsync(x => x.Id == serviceId);
+        if (row is null)
+        {
+            return;
+        }
+
+        var hasAppointments = await DbContext.Appointments.AnyAsync(x => x.ServiceOfferingId == serviceId);
+        if (hasAppointments)
+        {
+            row.IsActive = false;
+            await DbContext.SaveChangesAsync();
+            _statusMessage = "Service has appointments. It was deactivated instead of deleted.";
+            await LoadServicesAsync();
+            return;
+        }
+
+        DbContext.ServiceOfferings.Remove(row);
+        await DbContext.SaveChangesAsync();
+
+        _statusMessage = "Service deleted.";
+        await LoadServicesAsync();
+
+        if (_editingId == serviceId)
+        {
+            CloseEditModal();
+        }
+    }
+
+    private void ResetNewForm()
+    {
+        _newService.Name = string.Empty;
+        _newService.Price = 0;
+        _newService.DurationMinutes = 60;
+        _newService.IsActive = true;
+    }
+
+    private void CloseEditModal()
+    {
+        _isEditModalOpen = false;
+        _editingId = 0;
+
+        _editService.Name = string.Empty;
+        _editService.Price = 0;
+        _editService.DurationMinutes = 60;
+        _editService.IsActive = true;
+    }
+
+    private sealed class ServiceEditorModel
+    {
+        [Required]
+        [MaxLength(120)]
+        public string Name { get; set; } = string.Empty;
+
+        [Range(0, 9999)]
+        public decimal Price { get; set; }
+
+        [Range(1, 600)]
+        public int DurationMinutes { get; set; } = 60;
+
+        public bool IsActive { get; set; } = true;
+    }
+}
+
+<style>
+    .card-block {
+        margin-top: 1rem;
+        border: 1px solid #e7ebf3;
+        border-radius: 14px;
+        background: #fff;
+    }
+
+    .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.8rem 0.9rem;
+        border-bottom: 1px solid #edf0f6;
+    }
+
+    .card-body {
+        padding: 0.9rem;
+    }
+
+    .service-form-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.6rem;
+        align-items: end;
+    }
+
+    .service-form-grid label {
+        display: block;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+    }
+
+    .field {
+        width: 100%;
+        border: 1px solid #d8dce8;
+        border-radius: 10px;
+        padding: 0.52rem 0.62rem;
+    }
+
+    .service-active label {
+        display: inline-flex;
+        gap: 0.4rem;
+        align-items: center;
+        font-weight: 600;
+    }
+
+    .service-actions {
+        margin-top: 0.75rem;
+        display: flex;
+        gap: 0.55rem;
+    }
+
+    .toggle-btn,
+    .save-btn,
+    .cancel-btn,
+    .table-actions button {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.52rem 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .toggle-btn,
+    .cancel-btn {
+        background: #f0f4fb;
+        color: #314056;
+    }
+
+    .save-btn {
+        background: linear-gradient(135deg, #ff6a5b, #ff4f7b);
+        color: #fff;
+    }
+
+    .status-msg {
+        margin: 0.6rem 0 0;
+        color: #2d5a18;
+        font-weight: 600;
+    }
+
+    .table-wrap {
+        margin-top: 0.8rem;
+        overflow-x: auto;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    th,
+    td {
+        padding: 0.6rem;
+        border-bottom: 1px solid #ecf0f6;
+        text-align: left;
+        font-size: 0.92rem;
+    }
+
+    .table-actions {
+        display: flex;
+        gap: 0.45rem;
+    }
+
+    .table-actions .danger {
+        background: #fce8ec;
+        color: #9f1f38;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(23, 29, 40, 0.42);
+        display: grid;
+        place-items: center;
+        z-index: 1000;
+        padding: 1rem;
+    }
+
+    .modal-card {
+        width: min(760px, 100%);
+        background: #fff;
+        border-radius: 14px;
+        border: 1px solid #dfe5f1;
+        box-shadow: 0 16px 38px rgba(25, 34, 51, 0.24);
+        padding: 1rem;
+    }
+
+    .modal-card h3 {
+        margin: 0 0 0.75rem;
+    }
+
+    @@media (max-width: 860px) {
+        .service-form-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+    }
+
+    @@media (max-width: 620px) {
+        .service-form-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>

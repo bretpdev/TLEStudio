@@ -1,0 +1,646 @@
+@using Microsoft.EntityFrameworkCore
+@using TLEStudio.Data
+@using TLEStudio.Models
+@inject IDbContextFactory<AppDbContext> DbContextFactory
+
+<section class="card-block">
+    <div class="card-head">
+        <strong>Time Management</strong>
+        <button type="button" class="toggle-btn" @onclick="ToggleTimeManagement">
+            @(_showTimeManagement ? "Collapse" : "Open")
+        </button>
+    </div>
+
+    @if (_showTimeManagement)
+    {
+        <div class="card-body admin-editor">
+            <p>Set weekly hours for each weekday and apply them across a target range, then use single-day overrides for exceptions.</p>
+
+            <div class="editor-subsection">
+                <h3>Apply Range</h3>
+
+                <div class="editor-tools">
+                    <div>
+                        <label for="rangeStart">Start</label>
+                        <InputDate id="rangeStart" @bind-Value="_rangeStart" />
+                    </div>
+                    <div>
+                        <label for="rangeEnd">End</label>
+                        <InputDate id="rangeEnd" @bind-Value="_rangeEnd" />
+                    </div>
+                </div>
+            </div>
+
+            <div class="editor-subsection">
+                <h3>Weekly Hours Template</h3>
+
+                <div class="weekly-grid">
+                    @foreach (var rule in _weeklyRules)
+                    {
+                        <div class="week-rule">
+                            <strong>@rule.DayName</strong>
+
+                            <label class="inline-check">
+                                <input type="checkbox" @bind="rule.IsOpen" />
+                                <span>Open</span>
+                            </label>
+
+                            <div class="week-rule-hours">
+                                <select @bind="rule.StartHour" disabled="@(!rule.IsOpen)">
+                                    @foreach (var hour in _hourChoices)
+                                    {
+                                        <option value="@hour">@FormatHourStart(hour)</option>
+                                    }
+                                </select>
+                                <span>to</span>
+                                <select @bind="rule.EndHour" disabled="@(!rule.IsOpen)">
+                                    @foreach (var hour in _hourChoices.Where(h => h > 0))
+                                    {
+                                        <option value="@hour">@FormatHourStart(hour)</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="editor-actions">
+                    <button type="button" class="outline-btn" @onclick="LoadWeeklyRulesAsync">Reload Template</button>
+                    <button type="button" class="auth-btn" @onclick="SaveWeeklyRulesAsync">Save Template</button>
+                    <button type="button" class="auth-btn secondary" @onclick="ApplyWeeklyTemplateAsync">Apply Template To Range</button>
+                </div>
+            </div>
+
+            <div class="editor-subsection">
+                <h3>Single-Day Override</h3>
+
+                <div class="editor-tools">
+                    <div>
+                        <label for="overrideDate">Date</label>
+                        <InputDate id="overrideDate" Value="_overrideDate" ValueChanged="OverrideDateChanged" ValueExpression="() => _overrideDate" />
+                    </div>
+                    <button type="button" class="auth-btn" @onclick="SaveOverrideDayAsync">Save Day Override</button>
+                    <button type="button" class="danger-btn" @onclick="CloseOverrideDayAsync">Close Day</button>
+                </div>
+
+                <div class="hour-grid">
+                    @foreach (var hour in _hourChoices)
+                    {
+                        <label>
+                            <input type="checkbox" checked="@IsHourSelected(hour)" @onchange="eventArgs => OnHourToggle(hour, eventArgs)" />
+                            <span>@FormatHour(hour)</span>
+                        </label>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_statusMessage))
+            {
+                <p class="admin-status">@_statusMessage</p>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private readonly int[] _hourChoices = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    private readonly HashSet<int> _selectedHours = [];
+    private readonly List<WeeklyRuleEditor> _weeklyRules = CreateDefaultWeeklyRules();
+
+    private DateOnly _rangeStart;
+    private DateOnly _rangeEnd;
+    private DateOnly _overrideDate = DateOnly.FromDateTime(DateTime.Today);
+    private bool _showTimeManagement;
+    private string? _statusMessage;
+
+    private EventCallback<DateOnly> OverrideDateChanged => EventCallback.Factory.Create<DateOnly>(this, OnOverrideDateChangedAsync);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        _rangeStart = StartOfBusinessWeek(today);
+        _rangeEnd = today.AddMonths(1);
+
+        await LoadWeeklyRulesAsync();
+        await LoadOverrideDayAsync();
+    }
+
+    private void ToggleTimeManagement()
+    {
+        _showTimeManagement = !_showTimeManagement;
+    }
+
+    private bool IsHourSelected(int hour)
+    {
+        return _selectedHours.Contains(hour);
+    }
+
+    private void OnHourToggle(int hour, ChangeEventArgs args)
+    {
+        var isChecked = args.Value is bool b && b;
+        if (isChecked)
+        {
+            _selectedHours.Add(hour);
+        }
+        else
+        {
+            _selectedHours.Remove(hour);
+        }
+    }
+
+    private string FormatHour(int hour)
+    {
+        var start = new DateTime(2000, 1, 1, hour, 0, 0);
+        var end = start.AddHours(1);
+        return $"{start:h tt} - {end:h tt}";
+    }
+
+    private string FormatHourStart(int hour)
+    {
+        var time = new DateTime(2000, 1, 1, hour, 0, 0);
+        return time.ToString("h tt");
+    }
+
+    private async Task LoadWeeklyRulesAsync()
+    {
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+
+        var dbRules = await db.WeeklyAvailabilityRules
+            .AsNoTracking()
+            .OrderBy(x => x.DayOfWeekNumber)
+            .ToListAsync();
+
+        foreach (var editor in _weeklyRules)
+        {
+            var dayNumber = (int)editor.DayOfWeek;
+            var dbRule = dbRules.FirstOrDefault(x => x.DayOfWeekNumber == dayNumber);
+            if (dbRule is null)
+            {
+                continue;
+            }
+
+            editor.IsOpen = dbRule.IsOpen;
+            editor.StartHour = dbRule.StartHour;
+            editor.EndHour = dbRule.EndHour;
+        }
+
+        _statusMessage = "Weekly template loaded.";
+    }
+
+    private async Task SaveWeeklyRulesAsync()
+    {
+        if (!TryValidateWeeklyRules(out var validationError))
+        {
+            _statusMessage = validationError;
+            return;
+        }
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        await UpsertWeeklyRulesAsync(db);
+        _statusMessage = "Weekly template saved.";
+    }
+
+    private async Task ApplyWeeklyTemplateAsync()
+    {
+        if (_rangeEnd < _rangeStart)
+        {
+            _statusMessage = "Range end must be on or after range start.";
+            return;
+        }
+
+        if (!TryValidateWeeklyRules(out var validationError))
+        {
+            _statusMessage = validationError;
+            return;
+        }
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+        await UpsertWeeklyRulesAsync(db);
+
+        var rangeStart = _rangeStart.ToDateTime(TimeOnly.MinValue);
+        var rangeEndExclusive = _rangeEnd.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var overrideDates = await db.DayAvailabilityOverrides
+            .AsNoTracking()
+            .Where(x => x.OverrideDate >= _rangeStart && x.OverrideDate <= _rangeEnd)
+            .Select(x => x.OverrideDate)
+            .ToListAsync();
+        var overrideDateSet = overrideDates.ToHashSet();
+
+        var existingRows = await db.AvailabilityHours
+            .Where(x => x.SlotStart >= rangeStart && x.SlotStart < rangeEndExclusive)
+            .Where(x => !overrideDateSet.Contains(DateOnly.FromDateTime(x.SlotStart)))
+            .ToListAsync();
+
+        db.AvailabilityHours.RemoveRange(existingRows);
+
+        var rulesByDay = _weeklyRules.ToDictionary(x => x.DayOfWeek);
+        var appliedDays = 0;
+
+        for (var day = _rangeStart; day <= _rangeEnd; day = day.AddDays(1))
+        {
+            if (day.DayOfWeek == DayOfWeek.Sunday || overrideDateSet.Contains(day))
+            {
+                continue;
+            }
+
+            if (!rulesByDay.TryGetValue(day.DayOfWeek, out var rule) || !rule.IsOpen)
+            {
+                continue;
+            }
+
+            appliedDays++;
+
+            for (var hour = rule.StartHour; hour < rule.EndHour; hour++)
+            {
+                var start = day.ToDateTime(new TimeOnly(hour, 0));
+                db.AvailabilityHours.Add(new AvailabilityHour
+                {
+                    SlotStart = start,
+                    SlotEnd = start.AddHours(1)
+                });
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        _statusMessage = overrideDateSet.Count == 0
+            ? $"Applied weekly template to {appliedDays} day(s) in range."
+            : $"Applied weekly template to {appliedDays} day(s) in range. Skipped {overrideDateSet.Count} override day(s).";
+    }
+
+    private async Task UpsertWeeklyRulesAsync(AppDbContext db)
+    {
+        var existingRules = await db.WeeklyAvailabilityRules.ToListAsync();
+
+        foreach (var editor in _weeklyRules)
+        {
+            var dayNumber = (int)editor.DayOfWeek;
+            var dbRule = existingRules.FirstOrDefault(x => x.DayOfWeekNumber == dayNumber);
+
+            if (dbRule is null)
+            {
+                db.WeeklyAvailabilityRules.Add(new WeeklyAvailabilityRule
+                {
+                    DayOfWeekNumber = dayNumber,
+                    IsOpen = editor.IsOpen,
+                    StartHour = editor.StartHour,
+                    EndHour = editor.EndHour
+                });
+                continue;
+            }
+
+            dbRule.IsOpen = editor.IsOpen;
+            dbRule.StartHour = editor.StartHour;
+            dbRule.EndHour = editor.EndHour;
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private bool TryValidateWeeklyRules(out string message)
+    {
+        foreach (var rule in _weeklyRules)
+        {
+            if (!rule.IsOpen)
+            {
+                continue;
+            }
+
+            if (rule.EndHour <= rule.StartHour)
+            {
+                message = $"{rule.DayName}: end hour must be later than start hour.";
+                return false;
+            }
+        }
+
+        message = string.Empty;
+        return true;
+    }
+
+    private async Task LoadOverrideDayAsync()
+    {
+        _selectedHours.Clear();
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+
+        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = dayStart.AddDays(1);
+
+        var rows = await db.AvailabilityHours
+            .AsNoTracking()
+            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
+            .ToListAsync();
+
+        foreach (var row in rows)
+        {
+            _selectedHours.Add(row.SlotStart.Hour);
+        }
+
+        _statusMessage = $"Loaded override day {_overrideDate:MMM d, yyyy}.";
+    }
+
+    private async Task OnOverrideDateChangedAsync(DateOnly value)
+    {
+        _overrideDate = value;
+        await LoadOverrideDayAsync();
+    }
+
+    private async Task SaveOverrideDayAsync()
+    {
+        if (_overrideDate.DayOfWeek == DayOfWeek.Sunday)
+        {
+            _statusMessage = "Sunday is closed. Pick Monday through Saturday for overrides.";
+            return;
+        }
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+
+        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = dayStart.AddDays(1);
+
+        var existingRows = await db.AvailabilityHours
+            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
+            .ToListAsync();
+
+        db.AvailabilityHours.RemoveRange(existingRows);
+
+        foreach (var hour in _selectedHours)
+        {
+            var start = _overrideDate.ToDateTime(new TimeOnly(hour, 0));
+            db.AvailabilityHours.Add(new AvailabilityHour
+            {
+                SlotStart = start,
+                SlotEnd = start.AddHours(1)
+            });
+        }
+
+        await UpsertDayOverrideAsync(db, _overrideDate);
+
+        await db.SaveChangesAsync();
+        _statusMessage = $"Saved day override for {_overrideDate:MMM d, yyyy}.";
+    }
+
+    private async Task CloseOverrideDayAsync()
+    {
+        if (_overrideDate.DayOfWeek == DayOfWeek.Sunday)
+        {
+            _statusMessage = "Sunday is already closed.";
+            return;
+        }
+
+        _selectedHours.Clear();
+
+        await using var db = await DbContextFactory.CreateDbContextAsync();
+
+        var dayStart = _overrideDate.ToDateTime(TimeOnly.MinValue);
+        var dayEnd = dayStart.AddDays(1);
+
+        var existingRows = await db.AvailabilityHours
+            .Where(x => x.SlotStart >= dayStart && x.SlotStart < dayEnd)
+            .ToListAsync();
+
+        if (existingRows.Count > 0)
+        {
+            db.AvailabilityHours.RemoveRange(existingRows);
+        }
+
+        await UpsertDayOverrideAsync(db, _overrideDate);
+        await db.SaveChangesAsync();
+
+        _statusMessage = $"Closed {_overrideDate:MMM d, yyyy}.";
+    }
+
+    private static async Task UpsertDayOverrideAsync(AppDbContext db, DateOnly day)
+    {
+        var existingOverride = await db.DayAvailabilityOverrides
+            .FirstOrDefaultAsync(x => x.OverrideDate == day);
+
+        if (existingOverride is null)
+        {
+            db.DayAvailabilityOverrides.Add(new DayAvailabilityOverride
+            {
+                OverrideDate = day
+            });
+        }
+    }
+
+    private static DateOnly StartOfBusinessWeek(DateOnly day)
+    {
+        var diff = ((int)day.DayOfWeek + 6) % 7;
+        return day.AddDays(-diff);
+    }
+
+    private sealed class WeeklyRuleEditor
+    {
+        public required DayOfWeek DayOfWeek { get; init; }
+
+        public required string DayName { get; init; }
+
+        public bool IsOpen { get; set; } = true;
+
+        public int StartHour { get; set; } = 10;
+
+        public int EndHour { get; set; } = 18;
+    }
+
+    private static List<WeeklyRuleEditor> CreateDefaultWeeklyRules()
+    {
+        return
+        [
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Monday, DayName = "Monday" },
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Tuesday, DayName = "Tuesday" },
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Wednesday, DayName = "Wednesday" },
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Thursday, DayName = "Thursday" },
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Friday, DayName = "Friday" },
+            new WeeklyRuleEditor { DayOfWeek = DayOfWeek.Saturday, DayName = "Saturday" }
+        ];
+    }
+}
+
+<style>
+    .card-block {
+        margin-top: 1rem;
+        border: 1px solid #e7ebf3;
+        border-radius: 14px;
+        background: #fff;
+    }
+
+    .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.8rem 0.9rem;
+        border-bottom: 1px solid #edf0f6;
+    }
+
+    .card-body {
+        padding: 0.9rem;
+    }
+
+    .toggle-btn {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.52rem 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: #f0f4fb;
+        color: #314056;
+    }
+
+    .admin-editor {
+        border-left: 6px solid #7e6be8;
+        border-radius: 12px;
+        background: linear-gradient(180deg, #ffffff, #fcfbff);
+        box-shadow: 0 8px 22px rgba(62, 48, 112, 0.08);
+    }
+
+    .admin-editor p {
+        color: #5f6672;
+        margin-bottom: 0.8rem;
+    }
+
+    .editor-subsection {
+        border: 1px solid #e7ebf3;
+        border-radius: 12px;
+        padding: 0.8rem;
+        margin-top: 0.85rem;
+    }
+
+    .editor-subsection h3 {
+        margin: 0 0 0.75rem;
+        font-size: 1rem;
+    }
+
+    .weekly-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.6rem;
+    }
+
+    .week-rule {
+        border: 1px solid #e5e9f2;
+        border-radius: 10px;
+        padding: 0.65rem;
+        display: grid;
+        gap: 0.45rem;
+    }
+
+    .inline-check {
+        display: inline-flex;
+        gap: 0.35rem;
+        align-items: center;
+        font-weight: 600;
+        color: #374357;
+        font-size: 0.92rem;
+    }
+
+    .week-rule-hours {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+
+    .week-rule-hours span {
+        color: #6a7384;
+        font-weight: 600;
+        font-size: 0.85rem;
+    }
+
+    .week-rule-hours select {
+        border: 1px solid #d7dce6;
+        border-radius: 8px;
+        padding: 0.35rem 0.5rem;
+        font: inherit;
+    }
+
+    .editor-actions {
+        margin-top: 0.75rem;
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
+
+    .editor-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        align-items: end;
+        margin-bottom: 0.9rem;
+    }
+
+    .editor-tools label {
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: #1f2430;
+        display: block;
+        margin-bottom: 0.25rem;
+    }
+
+    .editor-tools input {
+        border: 1px solid #d7dce6;
+        border-radius: 10px;
+        padding: 0.5rem 0.65rem;
+        font: inherit;
+    }
+
+    .auth-btn,
+    .outline-btn {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.65rem 1rem;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .auth-btn {
+        background: linear-gradient(135deg, #ff6a5b, #ff4f7b);
+        color: #fff;
+    }
+
+    .auth-btn.secondary {
+        background: linear-gradient(135deg, #2f7fff, #3faac8);
+    }
+
+    .outline-btn {
+        background: #f4f7fb;
+        color: #374357;
+    }
+
+    .danger-btn {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.65rem 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: #fce8ec;
+        color: #9f1f38;
+    }
+
+    .hour-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.5rem;
+    }
+
+    .hour-grid label {
+        border: 1px solid #e5e9f2;
+        border-radius: 10px;
+        padding: 0.55rem 0.6rem;
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+
+    .admin-status {
+        margin-top: 0.7rem;
+        color: #2d5a18;
+        font-weight: 600;
+    }
+
+    @@media (max-width: 620px) {
+        .editor-tools {
+            flex-direction: column;
+            align-items: stretch;
+        }
+    }
+</style>
