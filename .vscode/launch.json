@@ -6,9 +6,9 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/OneChairStudio/bin/Debug/net9.0/OneChairStudio.dll",
+      "program": "${workspaceFolder}/TLEStudio/bin/Debug/net9.0/TLEStudio.dll",
       "args": [],
-      "cwd": "${workspaceFolder}/OneChairStudio",
+      "cwd": "${workspaceFolder}/TLEStudio",
       "stopAtEntry": false,
       "serverReadyAction": {
         "action": "openExternally",

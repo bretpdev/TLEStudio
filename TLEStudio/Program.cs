@@ -132,7 +132,7 @@ app.MapGet("/calendar-feed.ics", async (HttpContext http, AppDbContext db, IConf
     sb.AppendLine("PRODID:-//TLEStudio//Appointments//EN");
     sb.AppendLine("CALSCALE:GREGORIAN");
     sb.AppendLine("METHOD:PUBLISH");
-    sb.AppendLine("X-WR-CALNAME:One Chair Studio Appointments");
+    sb.AppendLine("X-WR-CALNAME:TLE Studio Appointments");
 
     foreach (var row in appointments)
     {
