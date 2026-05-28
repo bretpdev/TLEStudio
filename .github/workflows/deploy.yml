@@ -1,0 +1,102 @@
+name: Build and Deploy Blazor Server App to Azure
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AZURE_WEBAPP_NAME: tlestudio
+      AZURE_RESOURCE_GROUP: NEPlumbingInc
+
+    steps:
+    # 1️⃣ Checkout your repository
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    # 2️⃣ Setup .NET 8 SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Clean workspace
+      run: rm -rf ./bin ./obj ./publish
+      working-directory: ./TLEStudio
+
+    # 3️⃣ Restore dependencies
+    - name: Restore dependencies
+      run: dotnet restore
+      working-directory: ./TLEStudio
+
+    # 4️⃣ Build and publish
+    - name: Build and Publish
+      run: |
+        dotnet publish --configuration Release --no-restore --output ./publish
+      working-directory: ./TLEStudio
+
+    - name: Verify publish output
+      run: |
+        echo "Publish directory:" && pwd
+        ls -la ./publish
+        echo "Total publish size:" && du -sh ./publish
+      working-directory: ./TLEStudio
+
+    - name: Create deployment ZIP
+      run: |
+        rm -f ./app.zip
+        cd ./publish
+        zip -r ../app.zip .
+        cd ..
+        echo "ZIP size:" && du -sh ./app.zip
+      working-directory: ./TLEStudio
+
+    # 5️⃣ Login to Azure using service principal
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    # 6️⃣ Deploy to Azure App Service
+    - name: Deploy to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.AZURE_WEBAPP_NAME }}
+        package: './TLEStudio/app.zip'
+
+    - name: Dump Azure deployment logs (on failure)
+      if: failure()
+      run: |
+        set -euo pipefail
+        echo "Listing recent deployments..."
+        az webapp log deployment list \
+          --resource-group "${AZURE_RESOURCE_GROUP}" \
+          --name "${AZURE_WEBAPP_NAME}" \
+          --output table || true
+
+        echo "\nShowing latest deployment details..."
+        az webapp log deployment show \
+          --resource-group "${AZURE_RESOURCE_GROUP}" \
+          --name "${AZURE_WEBAPP_NAME}" \
+          --output jsonc || true
+
+        echo "\nAttempting to show the newest deployment by id (if available)..."
+        DEPLOYMENT_ID=$(az webapp log deployment list \
+          --resource-group "${AZURE_RESOURCE_GROUP}" \
+          --name "${AZURE_WEBAPP_NAME}" \
+          --query "[0].id" -o tsv 2>/dev/null || true)
+
+        if [ -n "${DEPLOYMENT_ID}" ]; then
+          az webapp log deployment show \
+            --resource-group "${AZURE_RESOURCE_GROUP}" \
+            --name "${AZURE_WEBAPP_NAME}" \
+            --deployment-id "${DEPLOYMENT_ID}" \
+            --output jsonc || true
+        else
+          echo "No deployment id returned from az."
+        fi
