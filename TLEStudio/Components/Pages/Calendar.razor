@@ -3,18 +3,18 @@
 @using System.Security.Claims
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
 @using TLEStudio.Data
 @using TLEStudio.Models
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject AppDbContext DbContext
+@inject IJSRuntime JS
 
 <PageTitle>Availability Calendar</PageTitle>
 
 <div class="calendar-page">
     <header class="calendar-head">
-        <p class="calendar-label">Client Calendar</p>
-        <h1>Open Appointments</h1>
-        <p>Weekly calendar blocks from this week through one month out, with an admin agenda for booked appointments.</p>
+        <h1>Manage Appointments</h1>
     </header>
 
     @if (!string.IsNullOrWhiteSpace(_bookingMessage))
@@ -24,34 +24,104 @@
 
     @if (!_isAdmin)
     {
-        <section class="my-bookings">
-            <h2>Your Booked Appointments</h2>
-
-            @if (_myAppointments.Count == 0)
-            {
-                <p class="my-bookings-empty">You do not have any booked appointments yet.</p>
-            }
-            else
-            {
-                <ul>
-                    @foreach (var booking in _myAppointments)
-                    {
-                        <li>
-                            <strong>@booking.ServiceName</strong>
-                            <span>@booking.Start.ToString("dddd, MMM d")</span>
-                            <span>@booking.Start.ToString("h:mm tt") - @booking.End.ToString("h:mm tt")</span>
-                            <a class="download-ics-link" href="@($"/appointments/{booking.AppointmentId}/download.ics")">Add to Calendar</a>
-                            <button type="button" class="cancel-booking-btn" @onclick="() => CancelAppointmentAsync(booking.AppointmentId)">Cancel</button>
-                        </li>
-                    }
-                </ul>
-            }
+        <section class="client-bookings-toggle" role="tablist" aria-label="Client booking history options">
+            <button type="button"
+                    role="tab"
+                    class="@GetClientBookingViewButtonClass(ClientBookingView.Upcoming)"
+                    aria-selected="@(_clientBookingView == ClientBookingView.Upcoming)"
+                    @onclick="() => _clientBookingView = ClientBookingView.Upcoming">
+                Upcoming Appointments
+            </button>
+            <button type="button"
+                    role="tab"
+                    class="@GetClientBookingViewButtonClass(ClientBookingView.Past)"
+                    aria-selected="@(_clientBookingView == ClientBookingView.Past)"
+                    @onclick="() => _clientBookingView = ClientBookingView.Past">
+                Past Appointments
+            </button>
         </section>
+
+        @if (_clientBookingView == ClientBookingView.Upcoming)
+        {
+            <section class="my-bookings">
+                <h2> Appointments</h2>
+
+                @if (_myAppointments.Count == 0)
+                {
+                    <p class="my-bookings-empty">You do not have any booked appointments yet.</p>
+                }
+                else
+                {
+                    <ul>
+                        @foreach (var booking in _myAppointments)
+                        {
+                            <li>
+                                <strong>@booking.ServiceName</strong>
+                                <span>@booking.Start.ToString("dddd, MMM d")</span>
+                                <span>@booking.Start.ToString("h:mm tt") - @booking.End.ToString("h:mm tt")</span>
+                                <a class="download-ics-link" href="@($"/appointments/{booking.AppointmentId}/download.ics")">Add to Calendar</a>
+                                <button type="button" class="cancel-booking-btn" @onclick="() => CancelAppointmentAsync(booking.AppointmentId)">Cancel</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </section>
+        }
+        else
+        {
+            <section class="agenda-wrap client-past-appointments">
+                <h2>Your Past Appointments</h2>
+
+                @if (_pastClientAppointments.Count == 0)
+                {
+                    <p class="agenda-empty">No past appointments found.</p>
+                }
+                else
+                {
+                    <ul class="agenda-list">
+                        @foreach (var item in PagedPastClientAppointments)
+                        {
+                            <li>
+                                <div class="agenda-primary">
+                                    <strong>@item.Start.ToString("dddd, MMM d")</strong>
+                                    <span>@item.Start.ToString("h:mm tt") - @item.End.ToString("h:mm tt")</span>
+                                    <small>@item.Label</small>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+
+                    @if (PastAppointmentsTotalPages > 1)
+                    {
+                        <div class="past-appointments-paging">
+                            <button type="button"
+                                    class="toggle-btn"
+                                    @onclick="PreviousPastAppointmentsPage"
+                                    disabled="@(_pastClientAppointmentsPage == 1)">
+                                Previous
+                            </button>
+                            <span>Page @_pastClientAppointmentsPage of @PastAppointmentsTotalPages</span>
+                            <button type="button"
+                                    class="toggle-btn"
+                                    @onclick="NextPastAppointmentsPage"
+                                    disabled="@(_pastClientAppointmentsPage >= PastAppointmentsTotalPages)">
+                                Next
+                            </button>
+                        </div>
+                    }
+                }
+            </section>
+        }
     }
 
     <section class="calendar-toolbar">
         <div class="range-nav">
-            <button type="button" class="range-nav-btn" @onclick="() => ShiftRangeAsync(-7)">Previous Week</button>
+            <button type="button"
+                    class="range-nav-btn"
+                    @onclick="() => ShiftRangeAsync(-7)"
+                    disabled="@(!_isAdmin && IsClientAtCurrentWeek())">
+                Previous Week
+            </button>
             <button type="button" class="range-nav-btn" @onclick="() => ShiftRangeAsync(7)">Next Week</button>
         </div>
 
@@ -248,18 +318,29 @@
     private int _adminSelectedClientId;
     private int _adminManageServiceId;
     private string? _adminManageMessage;
+    private ClientBookingView _clientBookingView = ClientBookingView.Upcoming;
+    private bool _restoreScrollAfterShift;
+    private int _pastClientAppointmentsPage = 1;
 
     private List<AgendaBookingItem> _agendaItems = [];
     private List<ClientBookingBlock> _myAppointments = [];
     private List<AdminBookedAppointment> _adminBookedAppointments = [];
+    private List<AgendaBookingItem> _pastClientAppointments = [];
+    private const int PastAppointmentsPageSize = 10;
+    private int PastAppointmentsTotalPages => Math.Max(1, (int)Math.Ceiling(_pastClientAppointments.Count / (double)PastAppointmentsPageSize));
+    private IReadOnlyList<AgendaBookingItem> PagedPastClientAppointments => _pastClientAppointments
+        .Skip((_pastClientAppointmentsPage - 1) * PastAppointmentsPageSize)
+        .Take(PastAppointmentsPageSize)
+        .ToList();
 
     protected override async Task OnInitializedAsync()
     {
         var today = DateOnly.FromDateTime(DateTime.Today);
-        _rangeStart = StartOfBusinessWeek(today);
-        _rangeEnd = today.AddMonths(1);
-
         await DetermineRoleAsync();
+
+        _rangeStart = StartOfBusinessWeek(today);
+        _rangeEnd = _rangeStart.AddDays(13);
+
         await LoadServicesAsync();
         BuildWeeks();
         await LoadAvailabilityAsync();
@@ -267,6 +348,7 @@
         if (!_isAdmin)
         {
             await LoadClientAppointmentsAsync();
+            await LoadPastClientAppointmentsAsync();
         }
 
         if (_isAdmin)
@@ -282,8 +364,22 @@
 
     private async Task ShiftRangeAsync(int dayOffset)
     {
-        _rangeStart = _rangeStart.AddDays(dayOffset);
-        _rangeEnd = _rangeEnd.AddDays(dayOffset);
+        await JS.InvokeVoidAsync("tleStudioScroll.capture");
+
+        var nextStart = _rangeStart.AddDays(dayOffset);
+        var nextEnd = nextStart.AddDays(13);
+
+        if (!_isAdmin)
+        {
+            var currentWeekStart = StartOfBusinessWeek(DateOnly.FromDateTime(DateTime.Today));
+            if (nextStart < currentWeekStart)
+            {
+                return;
+            }
+        }
+
+        _rangeStart = nextStart;
+        _rangeEnd = nextEnd;
 
         BuildWeeks();
         await LoadAvailabilityAsync();
@@ -292,6 +388,19 @@
         {
             await LoadAdminBookedAppointmentsAsync();
         }
+
+        _restoreScrollAfterShift = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_restoreScrollAfterShift)
+        {
+            _restoreScrollAfterShift = false;
+            await JS.InvokeVoidAsync("tleStudioScroll.restore");
+        }
+
+        await base.OnAfterRenderAsync(firstRender);
     }
 
     private void BuildWeeks()
@@ -410,6 +519,7 @@
             .Where(x => DateOnly.FromDateTime(x.SlotStart).DayOfWeek != DayOfWeek.Sunday)
             .Select(x => x.SlotStart)
             .Where(x => !blockedStarts.Contains(x))
+            .Where(x => x >= DateTime.Now)
             .Distinct()
             .OrderBy(x => x)
             .ToList();
@@ -461,7 +571,10 @@
 
         for (var day = _rangeStart; day <= _rangeEnd; day = day.AddDays(1))
         {
-            if (day.DayOfWeek == DayOfWeek.Sunday || existingDateSet.Contains(day) || overrideDateSet.Contains(day))
+            if (day < DateOnly.FromDateTime(DateTime.Today) ||
+                day.DayOfWeek == DayOfWeek.Sunday ||
+                existingDateSet.Contains(day) ||
+                overrideDateSet.Contains(day))
             {
                 continue;
             }
@@ -629,6 +742,7 @@
         _bookingMessage = $"Booked {opening.Start:MMM d} at {opening.Start:h:mm tt}.";
         await LoadAvailabilityAsync();
         await LoadClientAppointmentsAsync();
+        await LoadPastClientAppointmentsAsync();
         if (_isAdmin)
         {
             await LoadAdminBookedAppointmentsAsync();
@@ -773,12 +887,14 @@
         var row = await DbContext.Appointments.FirstOrDefaultAsync(x => x.Id == appointmentId && x.Status == "Booked");
         if (row is null)
         {
-            _adminManageMessage = "Appointment already removed.";
+            _adminManageMessage = "Appointment not found or already canceled.";
             await LoadAdminBookedAppointmentsAsync();
             return;
         }
 
-        DbContext.Appointments.Remove(row);
+        row.Status = "Canceled";
+        row.CanceledUtc = DateTime.UtcNow;
+        row.CanceledByUserName = _currentUserName;
         await DbContext.SaveChangesAsync();
 
         _adminManageMessage = "Appointment canceled.";
@@ -863,6 +979,58 @@
             .ToList();
     }
 
+    private async Task LoadPastClientAppointmentsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_currentUserName))
+        {
+            _pastClientAppointments = [];
+            _pastClientAppointmentsPage = 1;
+            return;
+        }
+
+        var rows = await DbContext.Appointments
+            .AsNoTracking()
+            .Where(x => x.ClientUserName == _currentUserName)
+            .Where(x => x.Status == "Booked")
+            .Where(x => x.EndTime < DateTime.Now)
+            .Join(
+                DbContext.ServiceOfferings.AsNoTracking(),
+                appt => appt.ServiceOfferingId,
+                svc => svc.Id,
+                (appt, svc) => new
+                {
+                    appt.Id,
+                    appt.StartTime,
+                    appt.EndTime,
+                    ServiceName = svc.Name,
+                    svc.DurationMinutes
+                })
+            .OrderByDescending(x => x.StartTime)
+            .ToListAsync();
+
+        _pastClientAppointments = rows
+            .Select(x => new AgendaBookingItem(x.Id, x.StartTime, x.EndTime, x.ServiceName, _currentUserName, x.DurationMinutes))
+            .ToList();
+
+        _pastClientAppointmentsPage = 1;
+    }
+
+    private void PreviousPastAppointmentsPage()
+    {
+        if (_pastClientAppointmentsPage > 1)
+        {
+            _pastClientAppointmentsPage -= 1;
+        }
+    }
+
+    private void NextPastAppointmentsPage()
+    {
+        if (_pastClientAppointmentsPage < PastAppointmentsTotalPages)
+        {
+            _pastClientAppointmentsPage += 1;
+        }
+    }
+
     private async Task CancelAppointmentAsync(int appointmentId)
     {
         if (appointmentId <= 0)
@@ -880,7 +1048,9 @@
             return;
         }
 
-        DbContext.Appointments.Remove(row);
+        row.Status = "Canceled";
+        row.CanceledUtc = DateTime.UtcNow;
+        row.CanceledByUserName = _currentUserName;
         await DbContext.SaveChangesAsync();
 
         _bookingMessage = $"Canceled appointment on {row.StartTime:MMM d} at {row.StartTime:h:mm tt}.";
@@ -900,7 +1070,24 @@
 
     private bool IsWithinRange(DateOnly day)
     {
-        return day >= _rangeStart && day <= _rangeEnd;
+        if (_isAdmin)
+        {
+            return day >= _rangeStart && day <= _rangeEnd;
+        }
+
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        return day >= today && day <= _rangeEnd;
+    }
+
+    private bool IsClientAtCurrentWeek()
+    {
+        if (_isAdmin)
+        {
+            return false;
+        }
+
+        var currentWeekStart = StartOfBusinessWeek(DateOnly.FromDateTime(DateTime.Today));
+        return _rangeStart <= currentWeekStart;
     }
 
     private string GetDayClass(DateOnly day)
@@ -923,6 +1110,11 @@
         return _selectedView == view ? "toggle-btn is-active" : "toggle-btn";
     }
 
+    private string GetClientBookingViewButtonClass(ClientBookingView view)
+    {
+        return _clientBookingView == view ? "toggle-btn is-active" : "toggle-btn";
+    }
+
     private sealed record AvailabilityEvent(int ServiceOfferingId, DateTime Start, DateTime End, string Label);
     private sealed record ClientBookingBlock(int AppointmentId, DateTime Start, DateTime End, string ServiceName);
     private sealed record AdminBookedAppointment(int AppointmentId, DateTime Start, DateTime End, string ServiceName, string ClientUserName);
@@ -932,6 +1124,12 @@
     {
         Calendar,
         Agenda
+    }
+
+    private enum ClientBookingView
+    {
+        Upcoming,
+        Past
     }
 }
 
@@ -1017,6 +1215,13 @@
         margin: 0.75rem 0 0;
         color: #2d5a18;
         font-weight: 600;
+    }
+
+    .client-bookings-toggle {
+        margin-top: 0.85rem;
+        display: flex;
+        gap: 0.45rem;
+        flex-wrap: wrap;
     }
 
     .my-bookings {
@@ -1543,6 +1748,10 @@
         box-shadow: 0 10px 24px rgba(36, 68, 132, 0.08);
     }
 
+    .client-past-appointments {
+        margin-top: 1rem;
+    }
+
     .agenda-wrap h2 {
         margin-top: 0;
     }
@@ -1591,6 +1800,21 @@
     .agenda-empty {
         color: #5f6672;
         font-size: 0.9rem;
+    }
+
+    .past-appointments-paging {
+        margin-top: 0.85rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    .past-appointments-paging span {
+        color: #5f6672;
+        font-size: 0.9rem;
+        font-weight: 600;
     }
 
     @@media (max-width: 760px) {

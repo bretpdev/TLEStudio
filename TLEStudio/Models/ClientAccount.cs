@@ -13,7 +13,32 @@ public sealed class LoginUser
     [Required]
     public string Password { get; set; } = string.Empty;
 
+    [MaxLength(256)]
+    public string? Email { get; set; }
+
+    public bool IsEmailVerified { get; set; } = true;
+
+    [MaxLength(128)]
+    public string? EmailVerificationTokenHash { get; set; }
+
+    public DateTime? EmailVerificationTokenExpiresUtc { get; set; }
+
+    [MaxLength(128)]
+    public string? PasswordResetTokenHash { get; set; }
+
+    public DateTime? PasswordResetTokenExpiresUtc { get; set; }
+
+    [Required]
+    [MaxLength(32)]
+    public string AccountState { get; set; } = LoginAccountStates.Active;
+
     public bool IsAdmin { get; set; }
+
+    public int FailedLoginCount { get; set; }
+
+    public DateTime? LockoutEndUtc { get; set; }
+
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }
 
 public sealed class AvailabilityHour
@@ -70,6 +95,11 @@ public sealed class Appointment
     [Required]
     [MaxLength(40)]
     public string Status { get; set; } = "Booked";
+
+    public DateTime? CanceledUtc { get; set; }
+
+    [MaxLength(100)]
+    public string? CanceledByUserName { get; set; }
 
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
 }

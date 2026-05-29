@@ -10,19 +10,19 @@
                 <div class="card-header login-card-header">
                     <p class="auth-eyebrow">Client Access</p>
                     <h1>Sign in to view availability</h1>
-                    <p class="auth-subtitle">Use your username and password to access your calendar openings.</p>
+                    <p class="auth-subtitle">Use your account credentials to access scheduling and appointments.</p>
                 </div>
                 <div class="card-body p-4">
                     @if (!string.IsNullOrWhiteSpace(_errorMessage))
                     {
-                        <div class="alert alert-danger d-flex align-items-center mb-4" role="alert">
+                        <div class="alert @(_isError ? "alert-danger" : "alert-success") d-flex align-items-center mb-4" role="alert">
                             <span>@_errorMessage</span>
                         </div>
                     }
 
                     <form method="post" action="/auth/login">
                         <div class="form-group mb-3">
-                            <label for="username" class="form-label">Username</label>
+                            <label for="username" class="form-label">Email or Username</label>
                             <input id="username" name="username" type="text" class="form-control" required />
                         </div>
 
@@ -39,7 +39,8 @@
                     </form>
 
                     <div class="auth-help">
-                        <p>Set your seeded login in Data/SeedData.cs (username and password).</p>
+                        <p><a class="text-link" href="/reset-password">Forgot your password?</a></p>
+                        <p>Need an account? <a class="text-link" href="/register">Create one here</a>.</p>
                     </div>
                 </div>
             </div>
@@ -49,6 +50,7 @@
 
 @code {
     private string? _errorMessage;
+    private bool _isError = true;
     private string _returnUrl = "/calendar";
 
     protected override void OnInitialized()
@@ -56,9 +58,65 @@
         var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
         var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
 
-        if (query.TryGetValue("error", out var errorFlag) && errorFlag.ToString() == "1")
+        if (query.TryGetValue("locked", out var lockedFlag) && lockedFlag.ToString() == "1")
         {
-            _errorMessage = "Incorrect email or password.";
+            _isError = true;
+            _errorMessage = "Too many failed attempts. Please wait 15 minutes and try again.";
+        }
+        else if (query.TryGetValue("denied", out var deniedFlag) && deniedFlag.ToString() == "1")
+        {
+            _isError = true;
+            _errorMessage = "Your account request was denied. Contact the studio if you believe this was a mistake.";
+        }
+        else if (query.TryGetValue("suspended", out var suspendedFlag) && suspendedFlag.ToString() == "1")
+        {
+            _isError = true;
+            _errorMessage = "Your account is currently suspended. Contact the studio for help restoring access.";
+        }
+        else if (query.TryGetValue("pending_approval", out var approvalFlag) && approvalFlag.ToString() == "1")
+        {
+            _isError = true;
+            _errorMessage = "Your account is awaiting admin approval before you can sign in.";
+        }
+        else if (query.TryGetValue("verify_pending", out var pendingFlag) && pendingFlag.ToString() == "1")
+        {
+            _isError = false;
+            _errorMessage = "Check your email for a verification link before signing in.";
+        }
+        else if (query.TryGetValue("verified", out var verifiedFlag) && verifiedFlag.ToString() == "1")
+        {
+            _isError = false;
+            _errorMessage = "Email verified. You can sign in now.";
+        }
+        else if (query.TryGetValue("verified", out var pendingApprovalVerifiedFlag) && pendingApprovalVerifiedFlag.ToString() == "pending_approval")
+        {
+            _isError = false;
+            _errorMessage = "Email verified. Your account is now waiting for admin approval.";
+        }
+        else if (query.TryGetValue("verified", out var verifiedExpiredFlag) && verifiedExpiredFlag.ToString() == "expired")
+        {
+            _isError = true;
+            _errorMessage = "Verification link has expired. Register again to receive a new link.";
+        }
+        else if (query.TryGetValue("unverified", out var unverifiedFlag) && unverifiedFlag.ToString() == "1")
+        {
+            _isError = true;
+            _errorMessage = "Please verify your email before signing in.";
+        }
+        else if (query.TryGetValue("error", out var errorFlag) && errorFlag.ToString() == "1")
+        {
+            _isError = true;
+            _errorMessage = "Incorrect username or password.";
+        }
+        else if (query.TryGetValue("reset", out var resetFlag) && resetFlag.ToString() == "1")
+        {
+            _isError = false;
+            _errorMessage = "Password reset complete. You can sign in with your new password.";
+        }
+        else if (query.TryGetValue("verified", out var verifiedFailedFlag) && verifiedFailedFlag.ToString() == "0")
+        {
+            _isError = true;
+            _errorMessage = "Verification link is invalid. Register again to request a new link.";
         }
 
         if (query.TryGetValue("returnUrl", out var returnUrl) && !string.IsNullOrWhiteSpace(returnUrl))

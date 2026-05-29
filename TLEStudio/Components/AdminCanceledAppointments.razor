@@ -1,0 +1,341 @@
+@using Microsoft.EntityFrameworkCore
+@using TLEStudio.Data
+@inject IDbContextFactory<AppDbContext> DbContextFactory
+
+<section class="canceled-audit-panel" aria-expanded="@_isExpanded">
+    <div class="canceled-audit-header">
+        <span>Canceled Appointments</span>
+        <div class="canceled-audit-header-actions">
+            @if (!_isExpanded)
+            {
+                <small>@_canceledAppointments.Count total</small>
+            }
+            <button class="toggle-btn" type="button" @onclick="ToggleExpanded">
+                @(_isExpanded ? "Collapse" : "Open")
+            </button>
+        </div>
+    </div>
+
+    @if (_isExpanded)
+    {
+        <div class="canceled-audit-content">
+        <div class="audit-toolbar">
+            <div class="audit-field">
+                <label for="canceledClientFilter">Filter by Client</label>
+                <select id="canceledClientFilter" @bind="_selectedClientFilter">
+                    <option value="">All clients</option>
+                    @foreach (var clientName in _canceledClientNames)
+                    {
+                        <option value="@clientName">@clientName</option>
+                    }
+                </select>
+            </div>
+
+            <div class="audit-field">
+                <label for="canceledByFilter">Filter by Canceled By</label>
+                <select id="canceledByFilter" @bind="_selectedCanceledByFilter">
+                    <option value="">All users</option>
+                    @foreach (var canceledByUser in _canceledByUsers)
+                    {
+                        <option value="@canceledByUser">@canceledByUser</option>
+                    }
+                </select>
+            </div>
+
+            <div class="audit-sort-controls">
+                <div class="audit-field">
+                    <label for="canceledSortMode">Sort by</label>
+                    <select id="canceledSortMode" @bind="_selectedSortMode">
+                        <option value="appointmentDate">Appointment date</option>
+                        <option value="canceledDate">Canceled date</option>
+                    </select>
+                </div>
+                <button
+                    class="btn btn-link btn-sm sort-direction-text"
+                    type="button"
+                    @onclick="ToggleSortDirection"
+                    aria-label="@(_sortDescending ? "Newest to oldest" : "Oldest to newest")"
+                    title="@(_sortDescending ? "Newest to oldest" : "Oldest to newest")">
+                    @(_sortDescending ? "Newest first" : "Oldest first")
+                </button>
+            </div>
+        </div>
+
+        @if (VisibleCanceledAppointments.Count == 0)
+        {
+            <p class="audit-empty">No canceled appointments found for this filter.</p>
+        }
+        else
+        {
+            <ul class="audit-list">
+                @foreach (var item in VisibleCanceledAppointments)
+                {
+                    <li>
+                        <div class="audit-primary">
+                            <strong>@item.StartTime.ToString("dddd, MMM d yyyy")</strong>
+                            <span>@item.StartTime.ToString("h:mm tt") - @item.EndTime.ToString("h:mm tt")</span>
+                            <small>Service: @item.ServiceName</small>
+                        </div>
+                        <div class="audit-meta">
+                            <em>Client: @item.ClientUserName</em>
+                            <small>Canceled by: @item.CanceledByUserName</small>
+                            <small>Canceled at: @item.CanceledUtc.ToLocalTime().ToString("MMM d yyyy, h:mm tt")</small>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+        </div>
+    }
+</section>
+
+@code {
+    private List<CanceledAppointmentAuditItem> _canceledAppointments = [];
+    private List<string> _canceledClientNames = [];
+    private List<string> _canceledByUsers = [];
+    private string _selectedClientFilter = string.Empty;
+    private string _selectedCanceledByFilter = string.Empty;
+    private string _selectedSortMode = "canceledDate";
+    private bool _sortDescending = true;
+    private bool _isExpanded;
+
+    private IReadOnlyList<CanceledAppointmentAuditItem> VisibleCanceledAppointments
+    {
+        get
+        {
+            IEnumerable<CanceledAppointmentAuditItem> query = _canceledAppointments;
+
+            if (!string.IsNullOrWhiteSpace(_selectedClientFilter))
+            {
+                query = query.Where(x => string.Equals(x.ClientUserName, _selectedClientFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_selectedCanceledByFilter))
+            {
+                query = query.Where(x => string.Equals(x.CanceledByUserName, _selectedCanceledByFilter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            query = _selectedSortMode switch
+            {
+                "appointmentDate" => _sortDescending
+                    ? query.OrderByDescending(x => x.StartTime)
+                    : query.OrderBy(x => x.StartTime),
+                _ => _sortDescending
+                    ? query.OrderByDescending(x => x.CanceledUtc)
+                    : query.OrderBy(x => x.CanceledUtc)
+            };
+
+            return query.ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCanceledAppointmentsAsync();
+    }
+
+    private void ToggleExpanded()
+    {
+        _isExpanded = !_isExpanded;
+    }
+
+    private void ToggleSortDirection()
+    {
+        _sortDescending = !_sortDescending;
+    }
+
+    private async Task LoadCanceledAppointmentsAsync()
+    {
+        await using var dbContext = await DbContextFactory.CreateDbContextAsync();
+
+        var rows = await dbContext.Appointments
+            .AsNoTracking()
+            .Where(x => x.Status == "Canceled")
+            .Join(
+                dbContext.ServiceOfferings.AsNoTracking(),
+                appt => appt.ServiceOfferingId,
+                svc => svc.Id,
+                (appt, svc) => new
+                {
+                    appt.Id,
+                    appt.ClientUserName,
+                    appt.StartTime,
+                    appt.EndTime,
+                    appt.CanceledUtc,
+                    appt.CanceledByUserName,
+                    ServiceName = svc.Name
+                })
+            .OrderByDescending(x => x.CanceledUtc ?? x.EndTime)
+            .ToListAsync();
+
+        _canceledAppointments = rows
+            .Select(x => new CanceledAppointmentAuditItem(
+                x.Id,
+                x.ClientUserName,
+                x.StartTime,
+                x.EndTime,
+                x.ServiceName,
+                x.CanceledUtc ?? x.EndTime,
+                string.IsNullOrWhiteSpace(x.CanceledByUserName) ? "Unknown" : x.CanceledByUserName))
+            .ToList();
+
+        _canceledClientNames = _canceledAppointments
+            .Select(x => x.ClientUserName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+
+        _canceledByUsers = _canceledAppointments
+            .Select(x => x.CanceledByUserName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToList();
+    }
+
+    private sealed record CanceledAppointmentAuditItem(
+        int AppointmentId,
+        string ClientUserName,
+        DateTime StartTime,
+        DateTime EndTime,
+        string ServiceName,
+        DateTime CanceledUtc,
+        string CanceledByUserName);
+}
+
+<style>
+    .canceled-audit-panel {
+        margin-top: 1rem;
+        border: 1px solid #e6e9ef;
+        border-radius: 14px;
+        background: linear-gradient(180deg, #ffffff, #fbfcff);
+        box-shadow: 0 10px 24px rgba(31, 36, 48, 0.08);
+        overflow: hidden;
+    }
+
+    .canceled-audit-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.9rem 1rem;
+        font-weight: 700;
+        border-left: 6px solid #e55b75;
+    }
+
+    .canceled-audit-header-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+    }
+
+    .canceled-audit-header small {
+        color: #666f7d;
+        font-weight: 600;
+    }
+
+    .toggle-btn {
+        border: 0;
+        border-radius: 999px;
+        padding: 0.52rem 0.85rem;
+        font-weight: 700;
+        cursor: pointer;
+        background: #f0f4fb;
+        color: #314056;
+    }
+
+    .canceled-audit-content {
+        padding: 0.95rem 1rem 1rem;
+        border-top: 1px solid #ecf0f6;
+    }
+
+    .audit-toolbar {
+        display: flex;
+        gap: 0.8rem;
+        align-items: end;
+        flex-wrap: wrap;
+        margin-bottom: 0.8rem;
+    }
+
+    .audit-field {
+        display: grid;
+        gap: 0.3rem;
+        min-width: 220px;
+    }
+
+    .audit-sort-controls {
+        display: inline-flex;
+        align-items: end;
+        gap: 0.45rem;
+    }
+
+    .audit-toolbar label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #7a8290;
+    }
+
+    .audit-toolbar select {
+        border: 1px solid #d7dce6;
+        border-radius: 10px;
+        padding: 0.5rem 0.65rem;
+        font: inherit;
+    }
+
+    .sort-direction-text {
+        padding: 0 0 0.15rem !important;
+        margin: 0;
+        line-height: 1.1;
+        text-decoration: none;
+        font-size: 0.82rem;
+        font-weight: 700;
+        color: #4a5d86;
+    }
+
+    .sort-direction-text:hover,
+    .sort-direction-text:focus {
+        text-decoration: underline;
+        color: #2f4777;
+    }
+
+    .audit-empty {
+        margin: 0;
+        color: #616b79;
+    }
+
+    .audit-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 0.55rem;
+    }
+
+    .audit-list li {
+        border: 1px solid #eceff4;
+        border-radius: 12px;
+        padding: 0.7rem 0.8rem;
+        display: flex;
+        justify-content: space-between;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+    }
+
+    .audit-primary,
+    .audit-meta {
+        display: grid;
+        gap: 0.12rem;
+    }
+
+    .audit-primary strong {
+        color: #1f2430;
+    }
+
+    .audit-primary small,
+    .audit-meta small,
+    .audit-meta em {
+        color: #5f6672;
+        font-size: 0.84rem;
+        font-style: normal;
+    }
+</style>

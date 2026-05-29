@@ -5,13 +5,19 @@ namespace TLEStudio.Data;
 
 public static class SeedData
 {
-    public static async Task Initialize(IServiceProvider serviceProvider, AppDbContext context)
+    public static async Task Initialize(IServiceProvider serviceProvider, AppDbContext context, bool isDevelopment)
     {
         var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SeedData");
         logger.LogInformation("Starting database initialization");
 
         await context.Database.EnsureCreatedAsync();
         await EnsureSchemaAsync(context, logger);
+
+        if (!isDevelopment)
+        {
+            logger.LogInformation("Skipping default credential seeding outside development environment.");
+            return;
+        }
 
         var hasAnyUser = await context.LoginUsers.AnyAsync();
         if (!hasAnyUser)
@@ -22,14 +28,20 @@ public static class SeedData
             var admin = new LoginUser
             {
                 UserName = "admin",
+                Email = "admin@localhost",
                 Password = BCrypt.Net.BCrypt.HashPassword("admin123"),
+                IsEmailVerified = true,
+                AccountState = LoginAccountStates.Active,
                 IsAdmin = true
             };
 
             var client = new LoginUser
             {
                 UserName = "client",
+                Email = "client@localhost",
                 Password = BCrypt.Net.BCrypt.HashPassword("client123"),
+                IsEmailVerified = true,
+                AccountState = LoginAccountStates.Active,
                 IsAdmin = false
             };
 
@@ -56,7 +68,10 @@ public static class SeedData
                 context.LoginUsers.Add(new LoginUser
                 {
                     UserName = "admin",
+                    Email = "admin@localhost",
                     Password = BCrypt.Net.BCrypt.HashPassword("admin123"),
+                    IsEmailVerified = true,
+                    AccountState = LoginAccountStates.Active,
                     IsAdmin = true
                 });
             }
@@ -80,7 +95,10 @@ public static class SeedData
             context.LoginUsers.Add(new LoginUser
             {
                 UserName = "client",
+                Email = "client@localhost",
                 Password = BCrypt.Net.BCrypt.HashPassword("client123"),
+                IsEmailVerified = true,
+                AccountState = LoginAccountStates.Active,
                 IsAdmin = false
             });
             await context.SaveChangesAsync();
@@ -185,6 +203,141 @@ public static class SeedData
 
             await context.Database.ExecuteSqlRawAsync(
                 """
+                IF COL_LENGTH('dbo.LoginUsers', 'FailedLoginCount') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD FailedLoginCount int NOT NULL CONSTRAINT DF_LoginUsers_FailedLoginCount DEFAULT(0);
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'LockoutEndUtc') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD LockoutEndUtc datetime2 NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'Email') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD Email nvarchar(256) NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'IsEmailVerified') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD IsEmailVerified bit NOT NULL CONSTRAINT DF_LoginUsers_IsEmailVerified DEFAULT(1);
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'EmailVerificationTokenHash') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD EmailVerificationTokenHash nvarchar(128) NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'EmailVerificationTokenExpiresUtc') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD EmailVerificationTokenExpiresUtc datetime2 NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'PasswordResetTokenHash') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD PasswordResetTokenHash nvarchar(128) NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'PasswordResetTokenExpiresUtc') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD PasswordResetTokenExpiresUtc datetime2 NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'AccountState') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD AccountState nvarchar(32) NOT NULL CONSTRAINT DF_LoginUsers_AccountState DEFAULT('Active');
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.LoginUsers', 'CreatedUtc') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.LoginUsers
+                    ADD CreatedUtc datetime2 NOT NULL CONSTRAINT DF_LoginUsers_CreatedUtc DEFAULT(SYSUTCDATETIME());
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = 'IX_LoginUsers_Email'
+                      AND object_id = OBJECT_ID('dbo.LoginUsers')
+                )
+                BEGIN
+                    CREATE UNIQUE INDEX IX_LoginUsers_Email
+                    ON dbo.LoginUsers(Email)
+                    WHERE Email IS NOT NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = 'IX_LoginUsers_PasswordResetTokenHash'
+                      AND object_id = OBJECT_ID('dbo.LoginUsers')
+                )
+                BEGIN
+                    CREATE UNIQUE INDEX IX_LoginUsers_PasswordResetTokenHash
+                    ON dbo.LoginUsers(PasswordResetTokenHash)
+                    WHERE PasswordResetTokenHash IS NOT NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = 'IX_LoginUsers_EmailVerificationTokenHash'
+                      AND object_id = OBJECT_ID('dbo.LoginUsers')
+                )
+                BEGIN
+                    CREATE UNIQUE INDEX IX_LoginUsers_EmailVerificationTokenHash
+                    ON dbo.LoginUsers(EmailVerificationTokenHash)
+                    WHERE EmailVerificationTokenHash IS NOT NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
                 IF OBJECT_ID('dbo.AvailabilityHours', 'U') IS NULL
                 BEGIN
                     CREATE TABLE dbo.AvailabilityHours (
@@ -247,6 +400,24 @@ public static class SeedData
 
                     CREATE INDEX IX_Appointments_StartTime ON dbo.Appointments (StartTime);
                     CREATE INDEX IX_Appointments_ServiceOfferingId ON dbo.Appointments (ServiceOfferingId);
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.Appointments', 'CanceledUtc') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.Appointments
+                    ADD CanceledUtc datetime2 NULL;
+                END;
+                """);
+
+            await context.Database.ExecuteSqlRawAsync(
+                """
+                IF COL_LENGTH('dbo.Appointments', 'CanceledByUserName') IS NULL
+                BEGIN
+                    ALTER TABLE dbo.Appointments
+                    ADD CanceledByUserName nvarchar(100) NULL;
                 END;
                 """);
 

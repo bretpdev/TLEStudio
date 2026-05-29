@@ -20,6 +20,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             .HasIndex(x => x.UserName)
             .IsUnique();
 
+        modelBuilder.Entity<LoginUser>()
+            .HasIndex(x => x.Email)
+            .IsUnique()
+            .HasFilter("[Email] IS NOT NULL");
+
+        modelBuilder.Entity<LoginUser>()
+            .HasIndex(x => x.EmailVerificationTokenHash)
+            .IsUnique()
+            .HasFilter("[EmailVerificationTokenHash] IS NOT NULL");
+
+        modelBuilder.Entity<LoginUser>()
+            .HasIndex(x => x.PasswordResetTokenHash)
+            .IsUnique()
+            .HasFilter("[PasswordResetTokenHash] IS NOT NULL");
+
         modelBuilder.Entity<AvailabilityHour>()
             .HasIndex(x => x.SlotStart)
             .IsUnique();
