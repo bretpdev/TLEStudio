@@ -4,7 +4,7 @@
 @using TLEStudio.Models
 @inject AppDbContext DbContext
 
-<section class="card-block">
+<section class="card-block services-card">
     <div class="card-head">
         <strong>Services</strong>
         <button type="button" class="toggle-btn" @onclick="ToggleServices">
@@ -290,21 +290,22 @@
 }
 
 <style>
-    .card-block {
+    .services-card {
         margin-top: 1rem;
         border: 1px solid #e7ebf3;
         border-radius: 14px;
         background: linear-gradient(180deg, #ffffff, #fffaf9);
-        border-left: 6px solid #ff8b7f;
-        box-shadow: 0 10px 24px rgba(255, 106, 91, 0.08);
+        border-left: 6px solid #f08a24;
+        box-shadow: 0 10px 24px rgba(240, 138, 36, 0.1);
     }
 
-    .card-head {
+    .services-card .card-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0.8rem 0.9rem;
-        border-bottom: 1px solid #edf0f6;
+        border-bottom: 1px solid #f3e3cf;
+        background: linear-gradient(180deg, #fff8ef, #fffdf9);
     }
 
     .card-body {
@@ -345,10 +346,10 @@
         gap: 0.55rem;
     }
 
-    .toggle-btn,
-    .save-btn,
-    .cancel-btn,
-    .table-actions button {
+    .services-card .toggle-btn,
+    .services-card .save-btn,
+    .services-card .cancel-btn,
+    .services-card .table-actions button {
         border: 0;
         border-radius: 999px;
         padding: 0.52rem 0.85rem;
@@ -356,13 +357,17 @@
         cursor: pointer;
     }
 
-    .toggle-btn,
-    .cancel-btn {
+    .services-card .toggle-btn {
+        background: #ffe8cf;
+        color: #7d4a0f;
+    }
+
+    .services-card .cancel-btn {
         background: #f0f4fb;
         color: #314056;
     }
 
-    .save-btn {
+    .services-card .save-btn {
         background: linear-gradient(135deg, #ff6a5b, #ff4f7b);
         color: #fff;
     }

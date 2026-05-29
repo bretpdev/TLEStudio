@@ -3,7 +3,7 @@
 @using TLEStudio.Models
 @inject IDbContextFactory<AppDbContext> DbContextFactory
 
-<section class="card-block">
+<section class="card-block time-card">
     <div class="card-head">
         <strong>Time Management</strong>
         <button type="button" class="toggle-btn" @onclick="ToggleTimeManagement">
@@ -458,7 +458,7 @@
 }
 
 <style>
-    .card-block {
+    .time-card {
         margin-top: 1rem;
         border: 1px solid #e7ebf3;
         border-radius: 14px;
@@ -467,30 +467,31 @@
         box-shadow: 0 10px 24px rgba(126, 107, 232, 0.1);
     }
 
-    .card-head {
+    .time-card .card-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0.8rem 0.9rem;
-        border-bottom: 1px solid #edf0f6;
+        border-bottom: 1px solid #e6e0ff;
+        background: linear-gradient(180deg, #f8f6ff, #fefcff);
     }
 
     .card-body {
         padding: 0.9rem;
     }
 
-    .toggle-btn {
+    .time-card .toggle-btn {
         border: 0;
         border-radius: 999px;
         padding: 0.52rem 0.85rem;
         font-weight: 700;
         cursor: pointer;
-        background: #f0f4fb;
-        color: #314056;
+        background: #ece8ff;
+        color: #4f3fa5;
     }
 
     .admin-editor {
-        border-left: 6px solid #7e6be8;
+        border: 1px solid #e7ebf3;
         border-radius: 12px;
         background: linear-gradient(180deg, #ffffff, #fcfbff);
         box-shadow: 0 8px 22px rgba(62, 48, 112, 0.08);
